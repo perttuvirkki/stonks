@@ -1,8 +1,20 @@
-import { MAX_PRICE, MIN_PRICE, VOLATILITY, WICK_VARIANCE } from './constants';
-import type { Candle } from './types';
+import { MAX_PRICE, MIN_PRICE, VOLATILITY, WICK_VARIANCE } from "./constants";
+import type { Candle } from "./types";
 
-export const clamp = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, value));
+export const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const randomNormal = () => {
+  // Box–Muller transform.
+  let u = 0;
+  let v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+};
+
+const randomAbsNormal = () => Math.abs(randomNormal());
+
+const randomAbsNormalClamped = (max: number) => Math.min(randomAbsNormal(), max);
 
 export const getPinchAxes = (touches: { pageX: number; pageY: number }[]) => {
   if (touches.length < 2) {
@@ -15,13 +27,28 @@ export const getPinchAxes = (touches: { pageX: number; pageY: number }[]) => {
 };
 
 export const createCandle = (previousClose: number): Candle => {
-  const open = previousClose;
-  const rawClose = open + (Math.random() - 0.5) * VOLATILITY;
+  // Add a small, realistic gap between previous close and next open.
+  const gap = randomNormal() * VOLATILITY * 0.06;
+  const open = clamp(previousClose + gap, MIN_PRICE, MAX_PRICE);
+
+  // Mixture distribution: mostly small moves, sometimes bigger impulses.
+  const impulseChance = 0.08;
+  const baseMove = randomNormal() * VOLATILITY * 0.28;
+  const impulseMove = Math.random() < impulseChance ? randomNormal() * VOLATILITY * 1.15 : 0;
+  const dojiChance = 0.12;
+
+  const rawClose = Math.random() < dojiChance ? open + randomNormal() * VOLATILITY * 0.06 : open + baseMove + impulseMove;
   const close = clamp(rawClose, MIN_PRICE, MAX_PRICE);
-  const wickScale = 0.6 + Math.random() * 0.9;
-  const wickSize = WICK_VARIANCE * wickScale;
-  const high = Math.max(open, close) + Math.random() * wickSize;
-  const low = Math.min(open, close) - Math.random() * wickSize;
+
+  const bodySize = Math.abs(close - open);
+
+  // Wicks: tied to body + baseline variance, with rare long-wick spikes.
+  const longWickChance = 0.04;
+  const wickMultiplier = (Math.random() < longWickChance ? 2.0 : 1) * (0.45 + Math.random() * 0.85);
+  const wickSize = (WICK_VARIANCE * 0.8 + bodySize * 0.25) * wickMultiplier;
+  const wickDraw = randomAbsNormalClamped(1.9);
+  const high = clamp(Math.max(open, close) + wickDraw * wickSize, MIN_PRICE, MAX_PRICE);
+  const low = clamp(Math.min(open, close) - wickDraw * wickSize, MIN_PRICE, MAX_PRICE);
 
   return {
     id: `${Date.now()}-${Math.floor(Math.random() * 100000)}`,
@@ -32,10 +59,7 @@ export const createCandle = (previousClose: number): Candle => {
   };
 };
 
-export const createTargetRunout = (
-  startPrice: number,
-  targetPrice: number,
-): Candle[] => {
+export const createTargetRunout = (startPrice: number, targetPrice: number): Candle[] => {
   const distance = targetPrice - startPrice;
   if (distance === 0) {
     return [];
@@ -57,21 +81,18 @@ export const createTargetRunout = (
     const reverseBar = Math.random() < counterChance;
     if (reverseBar) {
       const reverseSize = Math.abs(step) * (0.2 + Math.random() * 0.6);
-      close =
-        previousClose -
-        direction * reverseSize +
-        (Math.random() - 0.5) * Math.abs(step) * 0.2;
+      close = previousClose - direction * reverseSize + (Math.random() - 0.5) * Math.abs(step) * 0.2;
     } else {
-      close =
-        direction > 0
-          ? Math.max(close, previousClose + Math.abs(step) * 0.2)
-          : Math.min(close, previousClose - Math.abs(step) * 0.2);
+      close = direction > 0 ? Math.max(close, previousClose + Math.abs(step) * 0.2) : Math.min(close, previousClose - Math.abs(step) * 0.2);
     }
     const open = previousClose;
-    const wickScale = 0.5 + Math.random() * 0.8;
-    const wickSize = 0.8 * wickScale;
-    const high = Math.max(open, close) + Math.random() * wickSize;
-    const low = Math.min(open, close) - Math.random() * wickSize;
+    const bodySize = Math.abs(close - open);
+    const longWickChance = 0.03;
+    const wickMultiplier = (Math.random() < longWickChance ? 1.8 : 1) * (0.45 + Math.random() * 0.75);
+    const wickSize = (WICK_VARIANCE * 0.55 + bodySize * 0.22) * wickMultiplier;
+    const wickDraw = randomAbsNormalClamped(1.7);
+    const high = clamp(Math.max(open, close) + wickDraw * wickSize, MIN_PRICE, MAX_PRICE);
+    const low = clamp(Math.min(open, close) - wickDraw * wickSize, MIN_PRICE, MAX_PRICE);
 
     candles.push({
       id: `${Date.now()}-${index}-${Math.floor(Math.random() * 100000)}`,
@@ -86,10 +107,12 @@ export const createTargetRunout = (
 
   const finalOpen = previousClose;
   const finalClose = targetPrice;
-  const finalWickScale = 0.5 + Math.random() * 0.8;
-  const finalWickSize = 0.8 * finalWickScale;
-  const finalHigh = Math.max(finalOpen, finalClose) + Math.random() * finalWickSize;
-  const finalLow = Math.min(finalOpen, finalClose) - Math.random() * finalWickSize;
+  const finalBodySize = Math.abs(finalClose - finalOpen);
+  const finalWickMultiplier = (Math.random() < 0.05 ? 1.9 : 1) * (0.5 + Math.random() * 0.85);
+  const finalWickSize = (WICK_VARIANCE * 0.6 + finalBodySize * 0.22) * finalWickMultiplier;
+  const finalWickDraw = randomAbsNormalClamped(1.7);
+  const finalHigh = clamp(Math.max(finalOpen, finalClose) + finalWickDraw * finalWickSize, MIN_PRICE, MAX_PRICE);
+  const finalLow = clamp(Math.min(finalOpen, finalClose) - finalWickDraw * finalWickSize, MIN_PRICE, MAX_PRICE);
 
   candles.push({
     id: `${Date.now()}-target-${Math.floor(Math.random() * 100000)}`,

@@ -1,5 +1,5 @@
-export const CANDLE_COUNT = 44;
-export const HISTORY_COUNT = 300;
+export const CANDLE_COUNT = 100;
+export const HISTORY_COUNT = 500;
 export const TICK_MS = 100;
 export const BASE_PRICE = 500;
 export const MIN_PRICE = 0;

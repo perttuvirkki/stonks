@@ -3,8 +3,8 @@ import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
 const PATTERN_LENGTH = 48;
-const HIT_MIN = 5;
-const HIT_MAX = 8;
+const HIT_MIN = 3;
+const HIT_MAX = 6;
 
 const buildPivotIndices = (length: number, pivotCount: number): number[] => {
   if (pivotCount <= 1) {
@@ -14,10 +14,13 @@ const buildPivotIndices = (length: number, pivotCount: number): number[] => {
   const total = Math.max(1, length - 1);
   const baseGap = Math.max(1, Math.floor(total / gaps));
   const remainder = total - baseGap * gaps;
+  const bonusSlots = new Set<number>();
+  while (bonusSlots.size < remainder) {
+    bonusSlots.add(Math.floor(Math.random() * gaps));
+  }
   const gapSizes: number[] = [];
-
   for (let i = 0; i < gaps; i += 1) {
-    gapSizes.push(baseGap + (i < remainder ? 1 : 0));
+    gapSizes.push(baseGap + (bonusSlots.has(i) ? 1 : 0));
   }
 
   const indices: number[] = [0];
@@ -31,21 +34,13 @@ const buildPivotIndices = (length: number, pivotCount: number): number[] => {
 
 const generateDescendingTriangle = (
   startPrice: number,
-  length: number,
+  length: number
 ): { candles: Candle[]; resistanceStart: number; resistanceEnd: number; support: number } => {
   const pct = (value: number) => startPrice * value;
   const minPad = pct(0.015);
   const support = clamp(startPrice * 0.982, MIN_PRICE + minPad, MAX_PRICE - minPad);
-  const resistanceStart = clamp(
-    startPrice * 1.02,
-    support + pct(0.01),
-    MAX_PRICE - minPad,
-  );
-  const resistanceEnd = clamp(
-    startPrice * 0.992,
-    support + pct(0.006),
-    resistanceStart - pct(0.004),
-  );
+  const resistanceStart = clamp(startPrice * 1.02, support + pct(0.01), MAX_PRICE - minPad);
+  const resistanceEnd = clamp(startPrice * 0.992, support + pct(0.006), resistanceStart - pct(0.004));
   const edgeBuffer = pct(0.0009);
   const wickUnit = pct(0.0016);
   const noiseUnit = pct(0.0006);
@@ -58,23 +53,25 @@ const generateDescendingTriangle = (
   const touchCount = HIT_MIN + Math.floor(Math.random() * (HIT_MAX - HIT_MIN + 1));
   const pivotCount = touchCount * 2;
   const pivotIndices = buildPivotIndices(length, pivotCount);
-  const pivotTypes = pivotIndices.map((_, idx) => (idx % 2 === 0 ? "resistance" : "support"));
+  const pivotTypes: Array<"support" | "resistance"> = [];
+  for (let i = 0; i < pivotIndices.length; i += 1) {
+    if (i === 0) {
+      pivotTypes.push("resistance");
+      continue;
+    }
+    const prev = pivotTypes[i - 1];
+    const alternate = prev === "resistance" ? "support" : "resistance";
+    pivotTypes.push(Math.random() < 0.18 ? prev : alternate);
+  }
   const pivotPrices = pivotIndices.map((index, idx) => {
     const progress = length === 1 ? 1 : index / (length - 1);
-    const resistance =
-      resistanceStart + (resistanceEnd - resistanceStart) * progress;
+    const resistance = resistanceStart + (resistanceEnd - resistanceStart) * progress;
     if (pivotTypes[idx] === "support") {
-      return clamp(
-        support + edgeBuffer + Math.random() * edgeBuffer,
-        support + edgeBuffer * 0.3,
-        resistance - pct(0.004),
-      );
+      return clamp(support + edgeBuffer + Math.random() * edgeBuffer, support + edgeBuffer * 0.3, resistance - pct(0.004));
     }
     return resistance - (edgeBuffer + Math.random() * edgeBuffer);
   });
-  const pivotLookup = new Map<number, "support" | "resistance">(
-    pivotIndices.map((index, idx) => [index, pivotTypes[idx]]),
-  );
+  const pivotLookup = new Map<number, "support" | "resistance">(pivotIndices.map((index, idx) => [index, pivotTypes[idx]]));
 
   let segmentIndex = 0;
   let drift = 0;
@@ -86,12 +83,10 @@ const generateDescendingTriangle = (
     const endIndex = pivotIndices[segmentIndex + 1] ?? startIndex;
     const startPricePoint = pivotPrices[segmentIndex];
     const endPricePoint = pivotPrices[segmentIndex + 1] ?? startPricePoint;
-    const segmentProgress =
-      endIndex === startIndex ? 0 : (index - startIndex) / (endIndex - startIndex);
+    const segmentProgress = endIndex === startIndex ? 0 : (index - startIndex) / (endIndex - startIndex);
 
     const progress = length === 1 ? 1 : index / (length - 1);
-    const resistance =
-      resistanceStart + (resistanceEnd - resistanceStart) * progress;
+    const resistance = resistanceStart + (resistanceEnd - resistanceStart) * progress;
     const lowerBound = support + edgeBuffer;
     const upperBound = resistance - edgeBuffer;
     const open = previousClose;
@@ -110,21 +105,26 @@ const generateDescendingTriangle = (
         closeTarget = open - (closeTarget - open) * pullback;
       }
     }
-    if (pivotType === "support") {
-      closeTarget = lowerBound + Math.random() * (edgeBuffer * 0.9);
-    } else if (pivotType === "resistance") {
-      closeTarget = upperBound - Math.random() * (edgeBuffer * 0.9);
+    if (pivotType) {
+      const forceTouch = Math.random() < 0.62;
+      if (forceTouch && pivotType === "support") {
+        closeTarget = lowerBound + Math.random() * (edgeBuffer * 1.2);
+      } else if (forceTouch && pivotType === "resistance") {
+        closeTarget = upperBound - Math.random() * (edgeBuffer * 1.2);
+      }
     }
 
     const close = clamp(closeTarget, lowerBound, upperBound);
     let high = Math.max(open, close) + Math.random() * wickUnit;
     let low = Math.min(open, close) - Math.random() * wickUnit;
 
-    if (pivotType === "resistance") {
-      high = resistance + Math.random() * edgeBuffer;
-    }
-    if (pivotType === "support") {
-      low = support - Math.random() * edgeBuffer;
+    if (pivotType && Math.random() < 0.55) {
+      if (pivotType === "resistance") {
+        high = resistance + Math.random() * edgeBuffer;
+      }
+      if (pivotType === "support") {
+        low = support - Math.random() * edgeBuffer;
+      }
     }
 
     high = clamp(Math.max(high, open, close), lowerBound, resistance + edgeBuffer * 1.4);
@@ -149,8 +149,7 @@ export const descendingTrianglePattern: PatternDefinition = {
   label: "Descending Triangle",
   length: PATTERN_LENGTH,
   generate: (startPrice): PatternResult => {
-    const { candles, resistanceStart, resistanceEnd, support } =
-      generateDescendingTriangle(startPrice, PATTERN_LENGTH);
+    const { candles, resistanceStart, resistanceEnd, support } = generateDescendingTriangle(startPrice, PATTERN_LENGTH);
     const height = resistanceStart - support;
     const targetPrice = clamp(support - height, MIN_PRICE, MAX_PRICE);
     const lines: PatternLine[] = [

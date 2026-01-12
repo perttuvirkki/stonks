@@ -3,8 +3,8 @@ import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
 const PATTERN_LENGTH = 48;
-const HIT_MIN = 5;
-const HIT_MAX = 8;
+const HIT_MIN = 3;
+const HIT_MAX = 6;
 
 const buildPivotIndices = (length: number, pivotCount: number): number[] => {
   if (pivotCount <= 1) {
@@ -14,10 +14,13 @@ const buildPivotIndices = (length: number, pivotCount: number): number[] => {
   const total = Math.max(1, length - 1);
   const baseGap = Math.max(1, Math.floor(total / gaps));
   const remainder = total - baseGap * gaps;
+  const bonusSlots = new Set<number>();
+  while (bonusSlots.size < remainder) {
+    bonusSlots.add(Math.floor(Math.random() * gaps));
+  }
   const gapSizes: number[] = [];
-
   for (let i = 0; i < gaps; i += 1) {
-    gapSizes.push(baseGap + (i < remainder ? 1 : 0));
+    gapSizes.push(baseGap + (bonusSlots.has(i) ? 1 : 0));
   }
 
   const indices: number[] = [0];
@@ -51,7 +54,16 @@ const generateAscendingTriangle = (
   const touchCount = HIT_MIN + Math.floor(Math.random() * (HIT_MAX - HIT_MIN + 1));
   const pivotCount = touchCount * 2;
   const pivotIndices = buildPivotIndices(length, pivotCount);
-  const pivotTypes = pivotIndices.map((_, idx) => (idx % 2 === 0 ? "support" : "resistance"));
+  const pivotTypes: Array<"support" | "resistance"> = [];
+  for (let i = 0; i < pivotIndices.length; i += 1) {
+    if (i === 0) {
+      pivotTypes.push("support");
+      continue;
+    }
+    const prev = pivotTypes[i - 1];
+    const alternate = prev === "resistance" ? "support" : "resistance";
+    pivotTypes.push(Math.random() < 0.18 ? prev : alternate);
+  }
   const pivotPrices = pivotIndices.map((index, idx) => {
     const progress = length === 1 ? 1 : index / (length - 1);
     const support = lowStart + (lowEnd - lowStart) * progress;
@@ -60,9 +72,7 @@ const generateAscendingTriangle = (
     }
     return resistance - (edgeBuffer + Math.random() * edgeBuffer);
   });
-  const pivotLookup = new Map<number, "support" | "resistance">(
-    pivotIndices.map((index, idx) => [index, pivotTypes[idx]]),
-  );
+  const pivotLookup = new Map<number, "support" | "resistance">(pivotIndices.map((index, idx) => [index, pivotTypes[idx]]));
 
   let segmentIndex = 0;
   for (let index = 0; index < length; index += 1) {
@@ -95,21 +105,26 @@ const generateAscendingTriangle = (
         closeTarget = open - (closeTarget - open) * pullback;
       }
     }
-    if (pivotType === "support") {
-      closeTarget = lowerBound + Math.random() * (edgeBuffer * 0.9);
-    } else if (pivotType === "resistance") {
-      closeTarget = upperBound - Math.random() * (edgeBuffer * 0.9);
+    if (pivotType) {
+      const forceTouch = Math.random() < 0.62;
+      if (forceTouch && pivotType === "support") {
+        closeTarget = lowerBound + Math.random() * (edgeBuffer * 1.2);
+      } else if (forceTouch && pivotType === "resistance") {
+        closeTarget = upperBound - Math.random() * (edgeBuffer * 1.2);
+      }
     }
 
     const close = clamp(closeTarget, lowerBound, upperBound);
     let high = Math.max(open, close) + Math.random() * wickUnit;
     let low = Math.min(open, close) - Math.random() * wickUnit;
 
-    if (pivotType === "resistance") {
-      high = resistance + Math.random() * edgeBuffer;
-    }
-    if (pivotType === "support") {
-      low = support - Math.random() * edgeBuffer;
+    if (pivotType && Math.random() < 0.55) {
+      if (pivotType === "resistance") {
+        high = resistance + Math.random() * edgeBuffer;
+      }
+      if (pivotType === "support") {
+        low = support - Math.random() * edgeBuffer;
+      }
     }
 
     high = clamp(Math.max(high, open, close), lowerBound, resistance + edgeBuffer * 1.4);

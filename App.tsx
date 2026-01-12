@@ -1,14 +1,20 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Animated, Easing, Platform, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { ActionSheetIOS, Alert, Platform, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
+import { Easing, useSharedValue, withTiming } from "react-native-reanimated";
 import { BASE_PRICE, CANDLE_COUNT, HISTORY_COUNT, MAX_PRICE, MIN_PRICE, PATTERN_SPAWN_CHANCE, TICK_MS } from "./src/constants";
 import { CHART_SCRIPT } from "./src/chartScript";
 import { BottomControls } from "./src/components/BottomControls";
+import { MarginCallOverlay, type MarginCallVariant } from "./src/components/MarginCallOverlay";
 import { PatternBar } from "./src/components/PatternBar";
 import { ProfitToast } from "./src/components/ProfitToast";
-import { StackBar } from "./src/components/StackBar";
+import { StackBar, type ChartType } from "./src/components/StackBar";
 import TwemojiRocket from "./assets/twemoji/1f680.svg";
+import TwemojiCoin from "./assets/twemoji/1fa99.svg";
+import TwemojiBanknote from "./assets/twemoji/1f4b5.svg";
+import TwemojiFreezingFace from "./assets/twemoji/1f976.svg";
+import TwemojiHotFace from "./assets/twemoji/1f975.svg";
 import TwemojiSkull from "./assets/twemoji/1f480.svg";
 import type { ButtonVariant } from "./src/components/UiButton";
 import { allPatterns, choosePattern } from "./src/patterns";
@@ -127,6 +133,7 @@ const INJECTED_CHART_SCRIPT = `
       window.__chartState = {
         chart: null,
         series: null,
+        priceType: "candles",
         pending: null,
         didFit: false,
         follow: true,
@@ -167,6 +174,146 @@ const INJECTED_CHART_SCRIPT = `
     }
     if (!("didDisableAutoScale" in state)) {
       state.didDisableAutoScale = false;
+    }
+    if (!("priceType" in state)) {
+      state.priceType = "candles";
+    }
+
+    function mapOhlcToLine(data) {
+      var safe = Array.isArray(data) ? data : [];
+      var out = [];
+      for (var i = 0; i < safe.length; i += 1) {
+        var bar = safe[i];
+        if (!bar) continue;
+        var time = Number(bar.time);
+        var close = Number(bar.close);
+        if (!isFinite(time) || !isFinite(close)) continue;
+        out.push({ time: time, value: close });
+      }
+      return out;
+    }
+
+    function removePriceSeries() {
+      try {
+        if (state.chart && state.series && typeof state.chart.removeSeries === "function") {
+          state.chart.removeSeries(state.series);
+        }
+      } catch (e) {
+        // Ignore.
+      }
+      state.series = null;
+      state.markerApi = null;
+    }
+
+    function ensurePriceSeries(type) {
+      if (!state.chart) {
+        return false;
+      }
+      var nextType =
+        type === "line" || type === "area" || type === "baseline" ? type : "candles";
+      if (state.series && state.priceType === nextType) {
+        return true;
+      }
+      removePriceSeries();
+      state.priceType = nextType;
+
+      if (nextType === "line") {
+        var lineOptions = {
+          color: "#26a69a",
+          lineWidth: 2,
+          lineStyle: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        };
+        if (typeof state.chart.addLineSeries === "function") {
+          state.series = state.chart.addLineSeries(lineOptions);
+        } else if (
+          typeof state.chart.addSeries === "function" &&
+          window.LightweightCharts &&
+          window.LightweightCharts.LineSeries
+        ) {
+          state.series = state.chart.addSeries(window.LightweightCharts.LineSeries, lineOptions);
+        } else {
+          throw new Error("LineSeries API missing");
+        }
+        return !!state.series;
+      }
+
+      if (nextType === "area") {
+        var areaOptions = {
+          lineColor: "#26a69a",
+          topColor: "rgba(38, 166, 154, 0.35)",
+          bottomColor: "rgba(38, 166, 154, 0.02)",
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        };
+        if (typeof state.chart.addAreaSeries === "function") {
+          state.series = state.chart.addAreaSeries(areaOptions);
+        } else if (
+          typeof state.chart.addSeries === "function" &&
+          window.LightweightCharts &&
+          window.LightweightCharts.AreaSeries
+        ) {
+          state.series = state.chart.addSeries(window.LightweightCharts.AreaSeries, areaOptions);
+        } else {
+          throw new Error("AreaSeries API missing");
+        }
+        return !!state.series;
+      }
+
+      if (nextType === "baseline") {
+        var baseValuePrice = 0;
+        if (Array.isArray(state.pending) && state.pending.length) {
+          var firstBar = state.pending[0];
+          if (firstBar && isFinite(Number(firstBar.close))) {
+            baseValuePrice = Number(firstBar.close);
+          }
+        }
+        var baselineOptions = {
+          baseValue: { type: "price", price: baseValuePrice },
+          topLineColor: "#26a69a",
+          topFillColor1: "rgba(38, 166, 154, 0.35)",
+          topFillColor2: "rgba(38, 166, 154, 0.02)",
+          bottomLineColor: "#ef5350",
+          bottomFillColor1: "rgba(239, 83, 80, 0.25)",
+          bottomFillColor2: "rgba(239, 83, 80, 0.02)",
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        };
+        if (typeof state.chart.addBaselineSeries === "function") {
+          state.series = state.chart.addBaselineSeries(baselineOptions);
+        } else if (
+          typeof state.chart.addSeries === "function" &&
+          window.LightweightCharts &&
+          window.LightweightCharts.BaselineSeries
+        ) {
+          state.series = state.chart.addSeries(window.LightweightCharts.BaselineSeries, baselineOptions);
+        } else {
+          throw new Error("BaselineSeries API missing");
+        }
+        return !!state.series;
+      }
+
+      var seriesOptions = {
+        upColor: "#26a69a",
+        downColor: "#ef5350",
+        borderVisible: false,
+        wickUpColor: "#26a69a",
+        wickDownColor: "#ef5350",
+      };
+      if (typeof state.chart.addCandlestickSeries === "function") {
+        state.series = state.chart.addCandlestickSeries(seriesOptions);
+      } else if (typeof state.chart.addSeries === "function") {
+        if (!window.LightweightCharts || !window.LightweightCharts.CandlestickSeries) {
+          throw new Error("CandlestickSeries API missing");
+        }
+        state.series = state.chart.addSeries(window.LightweightCharts.CandlestickSeries, seriesOptions);
+      } else {
+        throw new Error("Chart series API missing");
+      }
+      return !!state.series;
     }
 
     function disableFollow(reason) {
@@ -293,34 +440,59 @@ const INJECTED_CHART_SCRIPT = `
       if (!last || !isFinite(Number(last.time))) {
         return;
       }
-      if (!timeScale || typeof timeScale.setVisibleRange !== "function") {
-        if (timeScale && typeof timeScale.scrollToRealTime === "function") {
-          timeScale.scrollToRealTime();
-        }
+
+      // Follow should *not* change zoom/scales; only pan the current view.
+      // Prefer built-in scroll APIs (pan-only).
+      if (timeScale && typeof timeScale.scrollToRealTime === "function") {
+        timeScale.scrollToRealTime();
         followPriceTo(last.close);
         return;
       }
-      var step = getBarStepSeconds(data);
-      var span = null;
-      if (timeScale && typeof timeScale.getVisibleRange === "function") {
-        var range = timeScale.getVisibleRange();
-        if (range && isFinite(range.from) && isFinite(range.to) && step > 0) {
-          var currentSpan = Math.round((range.to - range.from) / step);
-          if (currentSpan > 0) {
-            span = currentSpan;
+      if (timeScale && typeof timeScale.scrollToPosition === "function") {
+        // 0 keeps the latest bar at the right edge.
+        timeScale.scrollToPosition(0, false);
+        followPriceTo(last.close);
+        return;
+      }
+      if (!timeScale || typeof timeScale.setVisibleRange !== "function") {
+        followPriceTo(last.close);
+        return;
+      }
+
+      var currentSpanSeconds = null;
+      if (typeof timeScale.getVisibleRange === "function") {
+        var currentRange = timeScale.getVisibleRange();
+        if (currentRange && isFinite(currentRange.from) && isFinite(currentRange.to)) {
+          var spanSeconds = Number(currentRange.to) - Number(currentRange.from);
+          if (isFinite(spanSeconds) && spanSeconds > 0) {
+            currentSpanSeconds = spanSeconds;
           }
         }
       }
-      if (!span || !isFinite(span)) {
-        span = state.initialSpan;
+
+      var step = getBarStepSeconds(data);
+      var spanSecondsFallback = null;
+      var bars = state.initialSpan;
+      if (!bars || !isFinite(bars)) {
+        bars = Math.min(160, Math.max(40, Array.isArray(data) ? data.length : 80));
       }
-      if (!span || !isFinite(span)) {
-        span = Math.min(160, Math.max(40, Array.isArray(data) ? data.length : 80));
+      if (step > 0 && isFinite(bars) && bars > 0) {
+        spanSecondsFallback = step * bars;
       }
+      var spanToUse = currentSpanSeconds || spanSecondsFallback;
+      if (!spanToUse || !isFinite(spanToUse) || spanToUse <= 0) {
+        followPriceTo(last.close);
+        return;
+      }
+
+      // Keep a small right padding, but preserve span (no zoom).
+      var rightPad = step > 0 ? step * 2 : spanToUse * 0.02;
+      var to = Number(last.time) + rightPad;
       timeScale.setVisibleRange({
-        from: Number(last.time) - step * span,
-        to: Number(last.time) + step * 6,
+        from: to - spanToUse,
+        to: to,
       });
+
       followPriceTo(last.close);
     }
     function ensureChart() {
@@ -357,26 +529,7 @@ const INJECTED_CHART_SCRIPT = `
           });
         }
         if (!state.series && state.chart) {
-          var seriesOptions = {
-            upColor: "#26a69a",
-            downColor: "#ef5350",
-            borderVisible: false,
-            wickUpColor: "#26a69a",
-            wickDownColor: "#ef5350",
-          };
-          if (typeof state.chart.addCandlestickSeries === "function") {
-            state.series = state.chart.addCandlestickSeries(seriesOptions);
-          } else if (typeof state.chart.addSeries === "function") {
-            if (!window.LightweightCharts || !window.LightweightCharts.CandlestickSeries) {
-              throw new Error("CandlestickSeries API missing");
-            }
-            state.series = state.chart.addSeries(
-              window.LightweightCharts.CandlestickSeries,
-              seriesOptions,
-            );
-          } else {
-            throw new Error("Chart series API missing");
-          }
+          ensurePriceSeries(state.priceType || "candles");
           if (typeof ResizeObserver !== "undefined") {
             var resizeObserver = new ResizeObserver(function () { resizeChart(); });
             resizeObserver.observe(container);
@@ -387,14 +540,25 @@ const INJECTED_CHART_SCRIPT = `
 
           if (!state.didBindInteractions && container) {
             try {
-              container.addEventListener("wheel", function () { disableFollow("wheel"); }, { passive: true });
-              container.addEventListener("mousedown", function () { disableFollow("mouse"); });
+              // Do NOT disable follow on zoom gestures.
+              // - wheel is typically used for zoom
+              // - pinch zoom uses multi-touch
               container.addEventListener("mousemove", function (e) {
                 if (e && e.buttons) {
                   disableFollow("drag");
                 }
               });
-              container.addEventListener("touchmove", function () { disableFollow("touch"); }, { passive: true });
+              container.addEventListener(
+                "touchmove",
+                function (e) {
+                  // If this is a pinch (multi-touch), keep follow enabled.
+                  if (e && e.touches && e.touches.length >= 2) {
+                    return;
+                  }
+                  disableFollow("touch-pan");
+                },
+                { passive: true },
+              );
               state.didBindInteractions = true;
             } catch (e) {
               // Ignore event binding errors.
@@ -451,7 +615,11 @@ const INJECTED_CHART_SCRIPT = `
         return;
       }
       try {
-        state.series.setData(safe);
+        if (state.priceType === "line" || state.priceType === "area" || state.priceType === "baseline") {
+          state.series.setData(mapOhlcToLine(safe));
+        } else {
+          state.series.setData(safe);
+        }
       } catch (err) {
         var errMsg = String(err && err.message ? err.message : err);
         showOverlay("Chart error: " + errMsg);
@@ -651,7 +819,11 @@ const INJECTED_CHART_SCRIPT = `
         }
       }
       try {
-        state.series.update({ time: time, open: open, high: high, low: low, close: close });
+        if (state.priceType === "line" || state.priceType === "area" || state.priceType === "baseline") {
+          state.series.update({ time: time, value: close });
+        } else {
+          state.series.update({ time: time, open: open, high: high, low: low, close: close });
+        }
       } catch (err) {
         setData(pending);
       }
@@ -677,6 +849,26 @@ const INJECTED_CHART_SCRIPT = `
         return;
       }
       setPatternLines(lines);
+    };
+
+    window.__setChartType = function (type) {
+      try {
+        if (!ensureChart()) {
+          return;
+        }
+        ensurePriceSeries(type);
+        if (state.pending) {
+          setData(state.pending);
+        }
+        if (Array.isArray(state.markers) && state.markers.length) {
+          if (ensureMarkers() && state.markerApi && typeof state.markerApi.setMarkers === "function") {
+            state.markerApi.setMarkers(state.markers);
+          }
+        }
+        post({ type: "debug", message: "chartType:" + (state.priceType || "candles") });
+      } catch (e) {
+        post({ type: "error", message: "setChartType:" + String(e && e.message ? e.message : e) });
+      }
     };
     window.__resetView = function () {
       if (!ensureChart()) {
@@ -802,6 +994,31 @@ const INJECTED_CHART_SCRIPT = `
         state.markerApi.setMarkers(state.markers);
       }
     };
+
+    window.__clearTrades = function () {
+      if (!ensureChart()) {
+        return;
+      }
+      post({ type: "debug", message: "trades:clear" });
+      state.markers = [];
+      try {
+        if (state.series && typeof state.series.setMarkers === "function") {
+          state.series.setMarkers([]);
+        }
+      } catch (err) {
+        // Ignore
+      }
+      if (ensureMarkers()) {
+        if (state.markerApi && typeof state.markerApi.setMarkers === "function") {
+          state.markerApi.setMarkers([]);
+        }
+        if (state.markerApi && typeof state.markerApi.clearMarkers === "function") {
+          state.markerApi.clearMarkers();
+        }
+      } else {
+        post({ type: "debug", message: "markers-api-missing" });
+      }
+    };
     window.addEventListener("message", handleMessage);
     document.addEventListener("message", handleMessage);
     if (ensureChart()) {
@@ -821,14 +1038,21 @@ export default function App() {
   const candleIndexRef = useRef(0);
   const baseTimeRef = useRef<number | null>(null);
   const [isWebReady, setIsWebReady] = useState(false);
+  const [isChartFollowing, setIsChartFollowing] = useState(true);
+  const [isMarginCallVisible, setIsMarginCallVisible] = useState(false);
+  const [marginCallVariant, setMarginCallVariant] = useState<MarginCallVariant>("classic");
+  const [tickMs, setTickMs] = useState(TICK_MS);
+  const marginCallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isWebReadyRef = useRef(false);
   const latestChartDataRef = useRef<ChartBar[]>([]);
   const patternLinesRef = useRef<PatternLineIndex[]>([]);
   const hasSentFullDataRef = useRef(false);
+  const lastFullDataSendAtRef = useRef(0);
   const lineUpdateCounterRef = useRef(0);
   const [enabledPatternIds, setEnabledPatternIds] = useState<string[]>(() => allPatterns.map((pattern) => pattern.id));
   const enabledPatternIdsRef = useRef<string[]>(allPatterns.map((pattern) => pattern.id));
-  const initialStackBalance = 100;
+  const [chartType, setChartType] = useState<ChartType>("candles");
+  const initialStackBalance = 10;
   const stackBalanceRef = useRef(initialStackBalance);
   const positionsRef = useRef<Position[]>([]);
   const [stackBalance, setStackBalance] = useState(initialStackBalance);
@@ -836,8 +1060,10 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [leverageIndex, setLeverageIndex] = useState(1);
   const [tradeToast, setTradeToast] = useState<TradeToast | null>(null);
-  const toastTranslate = useRef(new Animated.Value(TOP_SHEET_OFFSET)).current;
+  const [rocketBurstTrigger, setRocketBurstTrigger] = useState(0);
+  const toastTranslateY = useSharedValue(TOP_SHEET_OFFSET);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTradeLabelRef = useRef<string>("Trade");
   const leverageOption = LEVERAGE_OPTIONS[leverageIndex] ?? LEVERAGE_OPTIONS[0];
   const wagerPercent = leverageOption.percent;
@@ -904,26 +1130,31 @@ export default function App() {
   };
   const showTradeToast = (toast: TradeToast) => {
     setTradeToast(toast);
+    // Rocket fly-by is the top/last profit tier.
+    if (toast.kind === "profit" && toast.percent >= 500) {
+      setRocketBurstTrigger(Date.now());
+    }
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
     }
-    Animated.timing(toastTranslate, {
-      toValue: 0,
+    if (toastHideTimeoutRef.current) {
+      clearTimeout(toastHideTimeoutRef.current);
+    }
+    toastTranslateY.value = withTiming(0, {
       duration: 240,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
+    });
     toastTimeoutRef.current = setTimeout(() => {
-      Animated.timing(toastTranslate, {
-        toValue: TOP_SHEET_OFFSET,
-        duration: 220,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) {
-          setTradeToast(null);
+      toastTranslateY.value = withTiming(
+        TOP_SHEET_OFFSET,
+        {
+          duration: 220,
+          easing: Easing.in(Easing.cubic),
         }
-      });
+      );
+      toastHideTimeoutRef.current = setTimeout(() => {
+        setTradeToast(null);
+      }, 240);
     }, 2400);
   };
   const openSettings = () => {
@@ -950,10 +1181,75 @@ export default function App() {
     }
   };
 
+  const testRocketToast = () => {
+    lastTradeLabelRef.current = "Test";
+    showTradeToast({ kind: "profit", amount: 999, percent: 500 });
+  };
+
+  const pickMarginCallVariant = (): MarginCallVariant => {
+    const roll = Math.random();
+    if (roll < 0.34) return "incomingCall";
+    if (roll < 0.67) return "breakingNews";
+    return "classic";
+  };
+
+  const applyChartType = (nextType: ChartType) => {
+    setChartType(nextType);
+    webViewRef.current?.injectJavaScript(
+      `window.__setChartType && window.__setChartType(${JSON.stringify(nextType)}); true;`
+    );
+  };
+
   const resetChartView = () => {
-    webViewRef.current?.injectJavaScript(`window.__enableFollow ? window.__enableFollow() : (window.__resetView && window.__resetView()); true;`);
+    // Follow should never reset/fit scales; only re-enable follow mode.
+    webViewRef.current?.injectJavaScript(`window.__enableFollow && window.__enableFollow(); true;`);
+  };
+
+  const resetRun = () => {
+    if (marginCallTimeoutRef.current) {
+      clearTimeout(marginCallTimeoutRef.current);
+      marginCallTimeoutRef.current = null;
+    }
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    if (toastHideTimeoutRef.current) {
+      clearTimeout(toastHideTimeoutRef.current);
+      toastHideTimeoutRef.current = null;
+    }
+    toastTranslateY.value = TOP_SHEET_OFFSET;
+    setTradeToast(null);
+
+    setIsMarginCallVisible(false);
+
+    stackBalanceRef.current = initialStackBalance;
+    setStackBalance(initialStackBalance);
+    positionsRef.current = [];
+
+    patternQueueRef.current = [];
+    targetQueueRef.current = [];
+    hasSpawnedPattern.current = false;
+    patternLinesRef.current = [];
+
+    candleIndexRef.current = 0;
+    baseTimeRef.current = null;
+    candlesRef.current = [];
+    latestChartDataRef.current = [];
+    hasSentFullDataRef.current = false;
+    lineUpdateCounterRef.current = 0;
+
+    setTickMs(TICK_MS);
+
+    initializeCandles();
+    resetChartView();
+    webViewRef.current?.injectJavaScript(`window.__clearTrades && window.__clearTrades(); true;`);
+    sendFullChartData();
+    sendPatternLines();
   };
   const handleBuy = (sideOverride?: "long" | "short") => {
+    if (isMarginCallVisible) {
+      return;
+    }
     const price = getCurrentPrice();
     if (!price || !Number.isFinite(price)) {
       return;
@@ -981,11 +1277,14 @@ export default function App() {
     const markerSide = useLeverage ? side : "buy";
     webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("${markerSide}"); true;`);
 
-    const labelSide = side === "short" ? "Short" : "Buy";
-    const labelLev = useLeverage ? `${leverage}X` : "Spot";
-    lastTradeLabelRef.current = `${labelSide} | ${labelLev}`;
+    const labelSide = side === "short" ? "Short" : useLeverage ? "Long" : "Buy";
+    const labelLev = useLeverage ? `${leverage}x` : "Spot";
+    lastTradeLabelRef.current = useLeverage ? `${labelSide} ${labelLev}` : `${labelSide} | ${labelLev}`;
   };
   const handleSell = () => {
+    if (isMarginCallVisible) {
+      return;
+    }
     const price = getCurrentPrice();
     if (!price || !Number.isFinite(price)) {
       return;
@@ -1096,9 +1395,13 @@ export default function App() {
     if (!isWebReadyRef.current) {
       return;
     }
+    const now = Date.now();
+    if (now - lastFullDataSendAtRef.current < 600) {
+      return;
+    }
+    lastFullDataSendAtRef.current = now;
     const payload = JSON.stringify(latestChartDataRef.current);
     webViewRef.current?.injectJavaScript(`window.__setChartData && window.__setChartData(${payload}); true;`);
-    hasSentFullDataRef.current = true;
   };
 
   const sendPatternLines = () => {
@@ -1113,12 +1416,30 @@ export default function App() {
     try {
       const message = JSON.parse(event.nativeEvent.data);
       if (message?.type === "ready") {
+        // WebView (re)initialized; force a full resync.
         setIsWebReady(true);
         isWebReadyRef.current = true;
+        hasSentFullDataRef.current = false;
+        lastFullDataSendAtRef.current = 0;
+
+        setIsChartFollowing(true);
         sendFullChartData();
         sendPatternLines();
+
+        const themePayload = JSON.stringify(chartTheme);
+        webViewRef.current?.injectJavaScript(`window.__setChartTheme && window.__setChartTheme(${themePayload}); true;`);
+        webViewRef.current?.injectJavaScript(`window.__setChartType && window.__setChartType(${JSON.stringify(chartType)}); true;`);
       } else if (message?.type === "debug") {
         console.log("WebView:", message.message);
+        const debugMessage = String(message.message ?? "");
+        if (debugMessage.startsWith("data:")) {
+          hasSentFullDataRef.current = true;
+        }
+        if (debugMessage === "follow:on" || debugMessage.startsWith("follow:on:")) {
+          setIsChartFollowing(true);
+        } else if (debugMessage.startsWith("follow:off")) {
+          setIsChartFollowing(false);
+        }
       } else if (message?.type === "error") {
         console.warn("WebView error:", message.message);
       }
@@ -1140,8 +1461,25 @@ export default function App() {
       if (toastTimeoutRef.current) {
         clearTimeout(toastTimeoutRef.current);
       }
+      if (toastHideTimeoutRef.current) {
+        clearTimeout(toastHideTimeoutRef.current);
+      }
+      if (marginCallTimeoutRef.current) {
+        clearTimeout(marginCallTimeoutRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isMarginCallVisible) {
+      return;
+    }
+    webViewRef.current?.injectJavaScript(`window.__clearTrades && window.__clearTrades(); true;`);
+    const retry = setTimeout(() => {
+      webViewRef.current?.injectJavaScript(`window.__clearTrades && window.__clearTrades(); true;`);
+    }, 50);
+    return () => clearTimeout(retry);
+  }, [isMarginCallVisible]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1216,8 +1554,17 @@ export default function App() {
           if (isLiquidated) {
             const margin = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
             positionsRef.current = [];
-            webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("sell"); true;`);
+            webViewRef.current?.injectJavaScript(`window.__clearTrades && window.__clearTrades(); true;`);
             showTradeToast({ kind: "liquidation", amount: -margin, percent: -100 });
+            setTickMs(300);
+            if (marginCallTimeoutRef.current) {
+              clearTimeout(marginCallTimeoutRef.current);
+            }
+            marginCallTimeoutRef.current = setTimeout(() => {
+              setMarginCallVariant(pickMarginCallVariant());
+              setIsMarginCallVisible(true);
+              marginCallTimeoutRef.current = null;
+            }, 900);
             shouldUpdateLines = true;
           }
         }
@@ -1227,10 +1574,10 @@ export default function App() {
       if (shouldUpdateLines || (positionsRef.current.length && lineUpdateCounterRef.current % 5 === 0)) {
         sendPatternLines();
       }
-    }, TICK_MS);
+    }, tickMs);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [tickMs]);
 
   useEffect(() => {
     if (!isWebReady) {
@@ -1250,9 +1597,36 @@ export default function App() {
     : "";
   const toastBackgroundAccessory =
     tradeToast?.kind === "profit" ? (
-      <TwemojiRocket width={150} height={150} style={styles.profitToastRocket} />
-    ) : tradeToast?.kind === "loss" ? (
+      tradeToast.percent >= 500 ? null : tradeToast.percent >= 100 ? (
+        <View pointerEvents="none" style={styles.profitToastBanknotes}>
+          <TwemojiBanknote width={92} height={92} style={styles.profitToastBanknote1} />
+          <TwemojiBanknote width={86} height={86} style={styles.profitToastBanknote2} />
+          <TwemojiBanknote width={78} height={78} style={styles.profitToastBanknote3} />
+          <TwemojiBanknote width={70} height={70} style={styles.profitToastBanknote4} />
+          <TwemojiBanknote width={64} height={64} style={styles.profitToastBanknote5} />
+        </View>
+      ) : (
+        <View pointerEvents="none" style={styles.profitToastCoins}>
+          <TwemojiCoin width={92} height={92} style={styles.profitToastCoin1} />
+          <TwemojiCoin width={86} height={86} style={styles.profitToastCoin2} />
+          <TwemojiCoin width={78} height={78} style={styles.profitToastCoin3} />
+          <TwemojiCoin width={70} height={70} style={styles.profitToastCoin4} />
+          <TwemojiCoin width={64} height={64} style={styles.profitToastCoin5} />
+        </View>
+      )
+    ) : tradeToast?.kind === "liquidation" ? (
       <TwemojiSkull width={150} height={150} style={styles.profitToastSkull} />
+    ) : tradeToast?.kind === "loss" ? (
+      (() => {
+        const lossMagnitude = Math.abs(tradeToast.percent);
+        if (lossMagnitude <= 25) {
+          return <TwemojiFreezingFace width={150} height={150} style={styles.profitToastLossFace} />;
+        }
+        if (lossMagnitude <= 50) {
+          return <TwemojiHotFace width={150} height={150} style={styles.profitToastLossFace} />;
+        }
+        return <TwemojiSkull width={150} height={150} style={styles.profitToastSkull} />;
+      })()
     ) : null;
   const toastSubtitleStyle =
     tradeToast?.kind === "loss"
@@ -1270,12 +1644,13 @@ export default function App() {
         <ProfitToast
           visible={!!tradeToast}
           darkMode={darkMode}
-          translateY={toastTranslate}
+          translateY={toastTranslateY}
           title={toastTitle}
           subtitle={toastSubtitle}
           backgroundAccessory={toastBackgroundAccessory}
           subtitleStyle={toastSubtitleStyle}
           styles={styles}
+          rocketBurstTrigger={tradeToast?.kind === "profit" && tradeToast.percent >= 500 ? rocketBurstTrigger : 0}
         />
         <StackBar
           stackBalance={stackBalance}
@@ -1285,7 +1660,11 @@ export default function App() {
           wagerPercentUsed={wagerPercentUsed}
           wagerAmount={wagerAmount}
           darkMode={darkMode}
+          isChartFollowing={isChartFollowing}
+          chartType={chartType}
           resetChartView={resetChartView}
+          setChartType={applyChartType}
+          onTestRocketToast={testRocketToast}
           openSettings={openSettings}
           minorVariant={minorVariant}
           styles={styles}
@@ -1309,15 +1688,23 @@ export default function App() {
             domStorageEnabled
             onMessage={handleWebMessage}
             injectedJavaScript={INJECTED_CHART_SCRIPT}
+            onLoadStart={() => {
+              // Reset on navigation start; the WebView will post { type: "ready" } when the bridge is actually ready.
+              setIsWebReady(false);
+              isWebReadyRef.current = false;
+              hasSentFullDataRef.current = false;
+              lastFullDataSendAtRef.current = 0;
+            }}
             onLoadEnd={() => {
-              if (!isWebReady) {
-                setIsWebReady(true);
-                isWebReadyRef.current = true;
-                sendFullChartData();
-                sendPatternLines();
-                const themePayload = JSON.stringify(chartTheme);
-                webViewRef.current?.injectJavaScript(`window.__setChartTheme && window.__setChartTheme(${themePayload}); true;`);
-              }
+              // No-op: onLoadEnd can fire after the "ready" handshake.
+            }}
+            onContentProcessDidTerminate={() => {
+              // iOS can kill the WebView process; reload and resync.
+              setIsWebReady(false);
+              isWebReadyRef.current = false;
+              hasSentFullDataRef.current = false;
+              lastFullDataSendAtRef.current = 0;
+              webViewRef.current?.reload();
             }}
           />
           <BottomControls
@@ -1340,6 +1727,7 @@ export default function App() {
             styles={styles}
           />
         </View>
+        <MarginCallOverlay visible={isMarginCallVisible} darkMode={darkMode} variant={marginCallVariant} onTryAgain={resetRun} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -1423,12 +1811,35 @@ const styles = StyleSheet.create({
   settingsButtonDark: {
     backgroundColor: "transparent",
   },
+  chartTypeScroller: {
+    maxWidth: 140,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  chartTypeScrollerDark: {
+    // Keep transparent; UiButton variants handle the visuals.
+  },
+  chartTypeScrollerContent: {
+    alignItems: "center",
+    paddingRight: 6,
+  },
+  chartTypeItem: {
+    height: 32,
+    borderRadius: 12,
+    marginLeft: 6,
+  },
+  chartTypeItemActive: {
+    // no-op; variant controls appearance.
+  },
   followButton: {
     height: 32,
     borderRadius: 12,
   },
   followButtonDark: {
-    backgroundColor: "transparent",
+    // Intentionally no background override; UiButton variant controls it.
   },
   topSafeArea: {
     position: "absolute",
@@ -1497,7 +1908,94 @@ const styles = StyleSheet.create({
     bottom: -58,
     opacity: 0.95,
   },
+  profitToastBanknote: {
+    position: "absolute",
+    left: -30,
+    bottom: -62,
+    opacity: 0.95,
+    transform: [{ rotate: "-8deg" }],
+  },
+  profitToastBanknotes: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    opacity: 0.95,
+  },
+  profitToastBanknote1: {
+    position: "absolute",
+    left: -10,
+    bottom: -40,
+  },
+  profitToastBanknote2: {
+    position: "absolute",
+    left: 62,
+    bottom: -30,
+    transform: [{ rotate: "-10deg" }],
+  },
+  profitToastBanknote3: {
+    position: "absolute",
+    right: -24,
+    bottom: -54,
+    transform: [{ rotate: "12deg" }],
+  },
+  profitToastBanknote4: {
+    position: "absolute",
+    right: 34,
+    bottom: -12,
+    transform: [{ rotate: "-18deg" }],
+  },
+  profitToastBanknote5: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    transform: [{ rotate: "18deg" }],
+  },
+  profitToastCoins: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    opacity: 0.95,
+  },
+  profitToastCoin1: {
+    position: "absolute",
+    left: -10,
+    bottom: -40,
+  },
+  profitToastCoin2: {
+    position: "absolute",
+    left: 62,
+    bottom: -30,
+    transform: [{ rotate: "-10deg" }],
+  },
+  profitToastCoin3: {
+    position: "absolute",
+    right: -24,
+    bottom: -54,
+    transform: [{ rotate: "12deg" }],
+  },
+  profitToastCoin4: {
+    position: "absolute",
+    right: 34,
+    bottom: -12,
+    transform: [{ rotate: "-18deg" }],
+  },
+  profitToastCoin5: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    transform: [{ rotate: "18deg" }],
+  },
   profitToastSkull: {
+    position: "absolute",
+    left: -20,
+    bottom: -52,
+    opacity: 0.92,
+  },
+  profitToastLossFace: {
     position: "absolute",
     left: -20,
     bottom: -52,
