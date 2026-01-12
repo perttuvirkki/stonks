@@ -1,0 +1,16 @@
+
+> stonks@1.0.0 start
+> expo start --port 8082 --non-interactive
+
+  --non-interactive is not supported, use $CI=1 instead
+Starting project at /Users/perttuvirkki/Projects/stonks/stonks
+TypeError: configs.toReversed is not a function
+TypeError: configs.toReversed is not a function
+    at mergeConfig (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/metro-config/src/loadConfig.js:179:35)
+    at getDefaultConfig (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/expo/node_modules/@expo/metro-config/src/ExpoMetroConfig.ts:427:23)
+    at loadMetroConfigAsync (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/expo/node_modules/@expo/cli/src/start/server/metro/instantiateMetro.ts:102:41)
+    at instantiateMetroAsync (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/expo/node_modules/@expo/cli/src/start/server/metro/instantiateMetro.ts:225:13)
+    at MetroBundlerDevServer.startImplementationAsync (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/expo/node_modules/@expo/cli/src/start/server/metro/MetroBundlerDevServer.ts:1062:96)
+    at MetroBundlerDevServer.startAsync (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/expo/node_modules/@expo/cli/src/start/server/BundlerDevServer.ts:160:18)
+    at DevServerManager.startAsync (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/expo/node_modules/@expo/cli/src/start/server/DevServerManager.ts:184:7)
+    at startAsync (/Users/perttuvirkki/Projects/stonks/stonks/node_modules/expo/node_modules/@expo/cli/src/start/startAsync.ts:100:3)

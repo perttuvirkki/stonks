@@ -1,0 +1,9 @@
+export const CANDLE_COUNT = 44;
+export const HISTORY_COUNT = 300;
+export const TICK_MS = 100;
+export const BASE_PRICE = 500;
+export const MIN_PRICE = 0;
+export const MAX_PRICE = 2000;
+export const VOLATILITY = 7;
+export const WICK_VARIANCE = 2.5;
+export const PATTERN_SPAWN_CHANCE = 0.06;
