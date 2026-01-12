@@ -4,7 +4,7 @@
     "slug": "stonks",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/appicon-ios.icon/Assets/Image.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -14,7 +14,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.perttuvirkki.stonks"
+      "bundleIdentifier": "com.ludussuper.stonks",
+      "icon": "./assets/appicon-ios.icon/Assets/Image.png"
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.perttuvirkki.stonks"
+      "package": "com.ludussuper.stonks"
     },
     "web": {
       "favicon": "./assets/favicon.png"
