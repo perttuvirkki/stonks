@@ -136,7 +136,7 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
       "Enter a name or tag for your screenshot", 
       [
         { text: "Cancel", style: "cancel" },
-        { text: "OK", onPress: (tag) => setScreenshotTag(tag) }
+        { text: "OK", onPress: (tag?: string) => setScreenshotTag(tag ?? null) }
       ], 
       "plain-text", 
       screenshotTag ?? ""

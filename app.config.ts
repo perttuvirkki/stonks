@@ -6,6 +6,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "stonks",
   slug: "stonks",
   version: "1.0.0",
+  scheme: "stonks",
+  plugins: ["expo-router"],
   orientation: "portrait",
   icon: "./assets/appicon-ios.icon/Assets/AppIcon~ios-marketing.png",
   userInterfaceStyle: "light",

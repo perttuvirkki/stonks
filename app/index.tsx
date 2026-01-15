@@ -6,44 +6,36 @@ import Animated, { Easing, FadeIn, FadeOut, useSharedValue, withSpring, withTimi
 import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 import * as SplashScreen from "expo-splash-screen";
-import { vexo } from "vexo-analytics";
-import { BASE_PRICE, CANDLE_COUNT, HISTORY_COUNT, MAX_PRICE, MIN_PRICE, PATTERN_SPAWN_CHANCE, TICK_MS } from "./src/constants";
-import { CHART_SCRIPT } from "./src/chartScript";
-import { BottomControls } from "./src/components/BottomControls";
-import { AnimatedSplash } from "./src/components/AnimatedSplash";
-import { MarginCallOverlay, type MarginCallVariant } from "./src/components/MarginCallOverlay";
-import { PatternSettingsModal } from "./src/components/PatternSettingsModal";
-import { ProFeaturesModal } from "./src/components/ProFeaturesModal";
-import { TopScoreModal } from "./src/components/TopScoreModal";
-import { TotalStatsModal } from "./src/components/TotalStatsModal";
-import { ProfitToast } from "./src/components/ProfitToast";
-import { RoundResultsSheet, type RoundResult, type RoundStats } from "./src/components/RoundResultsSheet";
-import { StackBar, type ChartType } from "./src/components/StackBar";
-import { RevenueCatProvider, useRevenueCat } from "./src/contexts/RevenueCatContext";
-import { useGameStore } from "./src/stores/useGameStore";
-import TwemojiRocket from "./assets/twemoji/1f680.svg";
-import TwemojiTrophy from "./assets/twemoji/1f3c6.svg";
+import * as StoreReview from "expo-store-review";
+import { BASE_PRICE, CANDLE_COUNT, HISTORY_COUNT, MAX_PRICE, MIN_PRICE, PATTERN_SPAWN_CHANCE, TICK_MS } from "../src/constants";
+import { CHART_SCRIPT } from "../src/chartScript";
+import { BottomControls } from "../src/components/BottomControls";
+import { AnimatedSplash } from "../src/components/AnimatedSplash";
+import { MarginCallOverlay, type MarginCallVariant } from "../src/components/MarginCallOverlay";
+import { PatternSettingsModal } from "../src/components/PatternSettingsModal";
+import { ProFeaturesModal } from "../src/components/ProFeaturesModal";
+import { TopScoreModal } from "../src/components/TopScoreModal";
+import { TotalStatsModal } from "../src/components/TotalStatsModal";
+import { ProfitToast } from "../src/components/ProfitToast";
+import { RoundResultsSheet, type RoundResult, type RoundStats } from "../src/components/RoundResultsSheet";
+import { StackBar, type ChartType } from "../src/components/StackBar";
+import { RevenueCatProvider, useRevenueCat } from "../src/contexts/RevenueCatContext";
+import { useGameStore } from "../src/stores/useGameStore";
+import TwemojiRocket from "../assets/twemoji/1f680.svg";
+import TwemojiTrophy from "../assets/twemoji/1f3c6.svg";
 
-// Prevent auto-hiding splash screen
-SplashScreen.preventAutoHideAsync();
-
-// Initialize Vexo analytics
-const vexoApiKey = Constants.expoConfig?.extra?.vexoApiKey;
-if (vexoApiKey) {
-  vexo(vexoApiKey);
-}
-import TwemojiCoin from "./assets/twemoji/1fa99.svg";
-import TwemojiWheel from "./assets/twemoji/1f6de.svg";
-import TwemojiBanknote from "./assets/twemoji/1f4b5.svg";
-import TwemojiFreezingFace from "./assets/twemoji/1f976.svg";
-import TwemojiHotFace from "./assets/twemoji/1f975.svg";
-import TwemojiSkull from "./assets/twemoji/1f480.svg";
-import type { ButtonVariant } from "./src/components/UiButton";
-import { UiButton } from "./src/components/UiButton";
-import { allPatterns, choosePattern } from "./src/patterns";
-import type { Candle } from "./src/types";
-import { createCandle, createTargetRunout } from "./src/utils";
-import * as GameCenter from "./src/services/GameCenterService";
+import TwemojiCoin from "../assets/twemoji/1fa99.svg";
+import TwemojiWheel from "../assets/twemoji/1f6de.svg";
+import TwemojiBanknote from "../assets/twemoji/1f4b5.svg";
+import TwemojiFreezingFace from "../assets/twemoji/1f976.svg";
+import TwemojiHotFace from "../assets/twemoji/1f975.svg";
+import TwemojiSkull from "../assets/twemoji/1f480.svg";
+import type { ButtonVariant } from "../src/components/UiButton";
+import { UiButton } from "../src/components/UiButton";
+import { allPatterns, choosePattern } from "../src/patterns";
+import type { Candle } from "../src/types";
+import { createCandle, createTargetRunout } from "../src/utils";
+import * as GameCenter from "../src/services/GameCenterService";
 
 type ChartBar = {
   time: number;
@@ -1121,6 +1113,7 @@ function AppContent() {
   const baseTimeRef = useRef<number | null>(null);
   const [isWebReady, setIsWebReady] = useState(false);
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(false);
+
   const [isChartFollowing, setIsChartFollowing] = useState(true);
   const [isMarginCallVisible, setIsMarginCallVisible] = useState(false);
   const isMarginCallVisibleRef = useRef(false);
@@ -1535,8 +1528,9 @@ function AppContent() {
     const darkModeOption = darkMode ? "Disable Dark Mode 🌙" : "Enable Dark Mode 🌙";
     const buyProOption = proPrice ? `Buy PRO ✨ (${proPrice})` : "Buy PRO ✨";
     const topScoresOption = "My top Scores 🏆";
+    const rateAppOption = "Rate this app ⭐️";
     const debugProOption = debugProOverride ? "🔧 Disable Debug Pro" : "🔧 Enable Debug Pro";
-    const options = [topScoresOption, "Total Stats 📊"];
+    const options = [topScoresOption, "Total Stats 📊", rateAppOption];
     if (isPro) {
         options.push(darkModeOption);
     } else {
@@ -1556,6 +1550,12 @@ function AppContent() {
         setIsTopScoreVisible(true);
       } else if (options[index] === "Total Stats 📊") {
         setIsTotalStatsVisible(true);
+      } else if (options[index] === rateAppOption) {
+        if (await StoreReview.hasAction()) {
+          StoreReview.requestReview();
+        } else {
+          Alert.alert("Error", "Store review is not available on this device.");
+        }
       } else if (options[index] === buyProOption) {
         setIsProFeaturesVisible(true);
       } else if (options[index] === "Restore Purchases") {
@@ -1578,7 +1578,7 @@ function AppContent() {
     } else {
       const alertButtons = options.slice(0, -1).map((opt, i) => ({
         text: opt,
-        onPress: () => onSelect(i),
+        onPress: () => { void onSelect(i); },
       }));
       alertButtons.push({ text: "Cancel", onPress: () => {} });
       Alert.alert("Settings", "Choose an option", alertButtons);
@@ -1686,6 +1686,7 @@ function AppContent() {
     }
     startSprintRoundIfNeeded(price);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
     const positionSize = amount * leverage;
     const units = positionSize / price;
     positionsRef.current = [...positionsRef.current, { entryPrice: price, units, amount, side, leverage, entryTime: Date.now() }];
@@ -2353,14 +2354,10 @@ function AppContent() {
   );
 }
 
-export default function App() {
-  return (
-    <SafeAreaProvider style={styles.container}>
-      <RevenueCatProvider>
-        <AppContent />
-      </RevenueCatProvider>
-    </SafeAreaProvider>
-  );
+
+
+export default function Index() {
+  return <AppContent />;
 }
 
 const styles = StyleSheet.create({
