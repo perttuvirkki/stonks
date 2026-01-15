@@ -11,6 +11,7 @@ import { bearFlagPattern } from "./bearFlag";
 import { bullPennantPattern } from "./bullPennant";
 import { bearPennantPattern } from "./bearPennant";
 import { doubleTopPattern } from "./doubleTop";
+import { doubleBottomPattern } from "./doubleBottom";
 import { ascendingWedgePattern } from "./ascendingWedge";
 import { descendingWedgePattern } from "./descendingWedge";
 import { ascendingBroadeningWedgePattern } from "./ascendingBroadeningWedge";
@@ -19,6 +20,7 @@ import { bullRectanglePattern } from "./bullRectangle";
 import { bearRectanglePattern } from "./bearRectangle";
 import { diamondTopPattern } from "./diamondTop";
 import { diamondBottomPattern } from "./diamondBottom";
+import { rangePattern } from "./range";
 
 export const allPatterns: PatternDefinition[] = [
   ascendingTrianglePattern,
@@ -40,6 +42,8 @@ export const allPatterns: PatternDefinition[] = [
   bullPennantPattern,
   bearPennantPattern,
   doubleTopPattern,
+  doubleBottomPattern,
+  rangePattern,
 ];
 
 const bullishPatternIds = new Set([
@@ -52,6 +56,7 @@ const bullishPatternIds = new Set([
   "bull-rectangle",
   "diamond-bottom",
   "bull-pennant",
+  "double-bottom",
 ]);
 
 const bearishPatternIds = new Set([

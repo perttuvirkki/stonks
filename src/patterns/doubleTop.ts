@@ -44,10 +44,10 @@ const generateDoubleTop = (
   const peakRight = clamp(peakLeft * (0.997 + Math.random() * 0.008), neckline + pct(0.016), MAX_PRICE - minPad);
   const height = Math.max(peakLeft, peakRight) - neckline;
   const preRallyLow = clamp(neckline - height * (0.62 + Math.random() * 0.16), MIN_PRICE + minPad, neckline - pct(0.004));
-  const breakdown = clamp(neckline - height * (0.22 + Math.random() * 0.12), MIN_PRICE + minPad, neckline - pct(0.004));
-  const continuation1 = clamp(neckline - height * (0.45 + Math.random() * 0.12), MIN_PRICE + minPad, breakdown - pct(0.003));
-  const continuation2 = clamp(neckline - height * (0.62 + Math.random() * 0.12), MIN_PRICE + minPad, continuation1 - pct(0.003));
-  const continuation3 = clamp(neckline - height * (0.74 + Math.random() * 0.12), MIN_PRICE + minPad, continuation2 - pct(0.002));
+  const breakdown = clamp(neckline - height * (0.35 + Math.random() * 0.15), MIN_PRICE + minPad, neckline - pct(0.004));
+  const continuation1 = clamp(neckline - height * (0.55 + Math.random() * 0.15), MIN_PRICE + minPad, breakdown - pct(0.003));
+  const continuation2 = clamp(neckline - height * (0.75 + Math.random() * 0.15), MIN_PRICE + minPad, continuation1 - pct(0.003));
+  const continuation3 = clamp(neckline - height * (0.90 + Math.random() * 0.15), MIN_PRICE + minPad, continuation2 - pct(0.002));
 
   const edgeBuffer = pct(0.0009);
   const wickUnit = pct(0.0016);

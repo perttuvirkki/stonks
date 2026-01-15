@@ -6,4 +6,4 @@ export const MIN_PRICE = 0;
 export const MAX_PRICE = 2000;
 export const VOLATILITY = 7;
 export const WICK_VARIANCE = 2.5;
-export const PATTERN_SPAWN_CHANCE = 0.06;
+export const PATTERN_SPAWN_CHANCE = 0.15;

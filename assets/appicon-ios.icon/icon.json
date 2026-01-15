@@ -1,21 +1,13 @@
 {
   "fill" : {
-    "automatic-gradient" : "extended-gray:1.00000,1.00000"
+    "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
-          "glass" : true,
-          "image-name" : "Image.png",
-          "name" : "Image",
-          "position" : {
-            "scale" : 2.89,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
+          "image-name" : "AppIcon~ios-marketing.png",
+          "name" : "AppIcon~ios-marketing"
         }
       ],
       "shadow" : {

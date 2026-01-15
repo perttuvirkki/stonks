@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Pressable, Text, type StyleProp, type ViewStyle } from "react-native";
+import * as Haptics from "expo-haptics";
 import { getContrastingTextColor } from "./uiColors";
 
 export type ButtonVariant = "bordered" | "borderedProminent" | "plain";
@@ -15,9 +16,10 @@ export type UiButtonProps = {
   controlSize?: ButtonControlSize;
   style?: StyleProp<ViewStyle>;
   darkMode?: boolean;
+  children?: React.ReactNode;
 };
 
-export const UiButton = memo(({ title, systemImage, onPress, disabled, variant, color, controlSize, style, darkMode }: UiButtonProps) => {
+export const UiButton = memo(({ title, systemImage, onPress, disabled, variant, color, controlSize, style, darkMode, children }: UiButtonProps) => {
   const size = controlSize ?? "regular";
   const paddingVertical = size === "large" ? 14 : size === "small" ? 6 : 10;
   const paddingHorizontal = size === "large" ? 14 : size === "small" ? 10 : 12;
@@ -32,9 +34,14 @@ export const UiButton = memo(({ title, systemImage, onPress, disabled, variant, 
 
   const displayTitle = title ?? (systemImage === "gearshape" ? "⚙︎" : "");
 
+  const handlePress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onPress?.();
+  };
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled}
       style={({ pressed }) => [
         {
@@ -51,7 +58,7 @@ export const UiButton = memo(({ title, systemImage, onPress, disabled, variant, 
         style,
       ]}
     >
-      <Text style={{ color: textColor, fontSize, fontWeight: "700" }}>{displayTitle}</Text>
+      {children ? children : <Text style={{ color: textColor, fontSize, fontWeight: "700" }}>{displayTitle}</Text>}
     </Pressable>
   );
 });

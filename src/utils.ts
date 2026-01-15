@@ -66,31 +66,76 @@ export const createTargetRunout = (startPrice: number, targetPrice: number): Can
   }
 
   const absDistance = Math.abs(distance);
-  const totalSteps = Math.max(6, Math.min(18, Math.round(absDistance / 2)));
+  const direction = distance > 0 ? 1 : -1;
+
+  // Determine drama level: 0 = calm, 1 = normal, 2 = explosive, 3 = violent
+  const dramaRoll = Math.random();
+  const dramaLevel = dramaRoll < 0.15 ? 3 : dramaRoll < 0.35 ? 2 : dramaRoll < 0.7 ? 1 : 0;
+
+  // Drama affects step count, speed, and overshoot
+  const baseSteps = Math.max(6, Math.min(18, Math.round(absDistance / 2)));
+  const stepMultiplier = dramaLevel === 3 ? 0.4 : dramaLevel === 2 ? 0.6 : dramaLevel === 0 ? 1.3 : 1;
+  const totalSteps = Math.max(3, Math.round(baseSteps * stepMultiplier));
   const runSteps = Math.max(1, totalSteps - 1);
+
+  // Overshoot for dramatic moves
+  const overshootAmount =
+    dramaLevel === 3 ? absDistance * (0.3 + Math.random() * 0.4) : dramaLevel === 2 ? absDistance * (0.1 + Math.random() * 0.2) : 0;
+  const overshootTarget = targetPrice + direction * overshootAmount;
+
+  // Counter-trend chance varies by drama
+  const counterChance = dramaLevel === 3 ? 0.1 : dramaLevel === 2 ? 0.2 : dramaLevel === 0 ? 0.45 : 0.35;
+
+  // Acceleration factor for explosive moves (front-loads the move)
+  const useAcceleration = dramaLevel >= 2;
+
   const candles: Candle[] = [];
   let previousClose = startPrice;
-  const direction = distance > 0 ? 1 : -1;
-  const counterChance = 0.35;
 
   for (let index = 0; index < runSteps; index += 1) {
-    const remaining = targetPrice - previousClose;
-    const step = remaining / (runSteps - index + 1);
-    const wiggle = (Math.random() - 0.5) * Math.abs(step) * 0.9;
-    let close = previousClose + step + wiggle;
+    const progress = (index + 1) / runSteps;
+
+    // For dramatic moves, accelerate early then slow down
+    let effectiveProgress = progress;
+    if (useAcceleration) {
+      // Ease-out curve: most movement happens early
+      effectiveProgress = 1 - Math.pow(1 - progress, dramaLevel === 3 ? 3 : 2);
+    }
+
+    const currentTarget = dramaLevel >= 2 && index < runSteps - 2 ? overshootTarget : targetPrice;
+    const targetAtProgress = startPrice + (currentTarget - startPrice) * effectiveProgress;
+
+    const remaining = targetAtProgress - previousClose;
+    const stepSize = remaining * (0.4 + Math.random() * 0.4);
+
+    // Momentum candles for dramatic moves
+    const momentumMultiplier = dramaLevel === 3 ? 1.8 + Math.random() * 0.8 : dramaLevel === 2 ? 1.3 + Math.random() * 0.5 : 1;
+
+    const wiggle = (Math.random() - 0.5) * Math.abs(stepSize) * (dramaLevel === 0 ? 1.2 : 0.6);
+    let close = previousClose + stepSize * momentumMultiplier + wiggle;
+
     const reverseBar = Math.random() < counterChance;
     if (reverseBar) {
-      const reverseSize = Math.abs(step) * (0.2 + Math.random() * 0.6);
-      close = previousClose - direction * reverseSize + (Math.random() - 0.5) * Math.abs(step) * 0.2;
+      const reverseSize = Math.abs(stepSize) * (0.2 + Math.random() * 0.6);
+      close = previousClose - direction * reverseSize + (Math.random() - 0.5) * Math.abs(stepSize) * 0.2;
     } else {
-      close = direction > 0 ? Math.max(close, previousClose + Math.abs(step) * 0.2) : Math.min(close, previousClose - Math.abs(step) * 0.2);
+      close = direction > 0 ? Math.max(close, previousClose + Math.abs(stepSize) * 0.2) : Math.min(close, previousClose - Math.abs(stepSize) * 0.2);
     }
+
+    // Clamp but allow overshoot for dramatic moves
+    const clampMax = direction > 0 ? Math.max(MAX_PRICE, overshootTarget) : MAX_PRICE;
+    const clampMin = direction < 0 ? Math.min(MIN_PRICE, overshootTarget) : MIN_PRICE;
+    close = clamp(close, Math.max(MIN_PRICE, clampMin), Math.min(MAX_PRICE, clampMax));
+
     const open = previousClose;
     const bodySize = Math.abs(close - open);
-    const longWickChance = 0.03;
-    const wickMultiplier = (Math.random() < longWickChance ? 1.8 : 1) * (0.45 + Math.random() * 0.75);
+
+    // Bigger wicks for dramatic moves
+    const longWickChance = dramaLevel >= 2 ? 0.15 : 0.03;
+    const baseWickMultiplier = dramaLevel === 3 ? 1.6 : dramaLevel === 2 ? 1.3 : 1;
+    const wickMultiplier = (Math.random() < longWickChance ? 2.2 : baseWickMultiplier) * (0.45 + Math.random() * 0.75);
     const wickSize = (WICK_VARIANCE * 0.55 + bodySize * 0.22) * wickMultiplier;
-    const wickDraw = randomAbsNormalClamped(1.7);
+    const wickDraw = randomAbsNormalClamped(dramaLevel >= 2 ? 2.2 : 1.7);
     const high = clamp(Math.max(open, close) + wickDraw * wickSize, MIN_PRICE, MAX_PRICE);
     const low = clamp(Math.min(open, close) - wickDraw * wickSize, MIN_PRICE, MAX_PRICE);
 
@@ -105,12 +150,15 @@ export const createTargetRunout = (startPrice: number, targetPrice: number): Can
     previousClose = close;
   }
 
+  // Final candle - for dramatic moves, might need to snap back from overshoot
   const finalOpen = previousClose;
   const finalClose = targetPrice;
   const finalBodySize = Math.abs(finalClose - finalOpen);
-  const finalWickMultiplier = (Math.random() < 0.05 ? 1.9 : 1) * (0.5 + Math.random() * 0.85);
+
+  // Dramatic finale candle
+  const finalWickMultiplier = (Math.random() < (dramaLevel >= 2 ? 0.2 : 0.05) ? 2.5 : 1) * (0.5 + Math.random() * 0.85);
   const finalWickSize = (WICK_VARIANCE * 0.6 + finalBodySize * 0.22) * finalWickMultiplier;
-  const finalWickDraw = randomAbsNormalClamped(1.7);
+  const finalWickDraw = randomAbsNormalClamped(dramaLevel >= 2 ? 2.5 : 1.7);
   const finalHigh = clamp(Math.max(finalOpen, finalClose) + finalWickDraw * finalWickSize, MIN_PRICE, MAX_PRICE);
   const finalLow = clamp(Math.min(finalOpen, finalClose) - finalWickDraw * finalWickSize, MIN_PRICE, MAX_PRICE);
 

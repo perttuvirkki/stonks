@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reanimated";
 import { RocketBurst } from "./RocketBurst";
+import { MoneyPrinterBurst } from "./MoneyPrinterBurst";
 
 export type ProfitToastProps = {
   visible: boolean;
@@ -14,6 +15,7 @@ export type ProfitToastProps = {
   subtitleStyle?: unknown;
   styles: Record<string, any>;
   rocketBurstTrigger?: number;
+  moneyPrinterTrigger?: number;
 };
 
 export function ProfitToast({
@@ -26,6 +28,7 @@ export function ProfitToast({
   subtitleStyle,
   styles,
   rocketBurstTrigger,
+  moneyPrinterTrigger,
 }: ProfitToastProps) {
   const [layout, setLayout] = useState({ width: 0, height: 0 });
 
@@ -50,7 +53,11 @@ export function ProfitToast({
       >
         {backgroundAccessory}
 
-        {!!rocketBurstTrigger && layout.width > 0 && layout.height > 0 ? (
+        {!!moneyPrinterTrigger && layout.width > 0 && layout.height > 0 ? (
+          <View pointerEvents="none" style={localStyles.rocketLayer}>
+            <MoneyPrinterBurst trigger={moneyPrinterTrigger} darkMode={darkMode} width={layout.width} height={layout.height} />
+          </View>
+        ) : !!rocketBurstTrigger && layout.width > 0 && layout.height > 0 ? (
           <View pointerEvents="none" style={localStyles.rocketLayer}>
             <RocketBurst trigger={rocketBurstTrigger} darkMode={darkMode} width={layout.width} height={layout.height} />
           </View>

@@ -1,25 +1,49 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Platform, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActionSheetIOS, Alert, Platform, Pressable, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
-import { Easing, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { Easing, FadeIn, FadeOut, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import Constants from "expo-constants";
+import * as Haptics from "expo-haptics";
+import * as SplashScreen from "expo-splash-screen";
+import { vexo } from "vexo-analytics";
 import { BASE_PRICE, CANDLE_COUNT, HISTORY_COUNT, MAX_PRICE, MIN_PRICE, PATTERN_SPAWN_CHANCE, TICK_MS } from "./src/constants";
 import { CHART_SCRIPT } from "./src/chartScript";
 import { BottomControls } from "./src/components/BottomControls";
+import { AnimatedSplash } from "./src/components/AnimatedSplash";
 import { MarginCallOverlay, type MarginCallVariant } from "./src/components/MarginCallOverlay";
-import { PatternBar } from "./src/components/PatternBar";
+import { PatternSettingsModal } from "./src/components/PatternSettingsModal";
+import { ProFeaturesModal } from "./src/components/ProFeaturesModal";
+import { TopScoreModal } from "./src/components/TopScoreModal";
+import { TotalStatsModal } from "./src/components/TotalStatsModal";
 import { ProfitToast } from "./src/components/ProfitToast";
+import { RoundResultsSheet, type RoundResult, type RoundStats } from "./src/components/RoundResultsSheet";
 import { StackBar, type ChartType } from "./src/components/StackBar";
+import { RevenueCatProvider, useRevenueCat } from "./src/contexts/RevenueCatContext";
+import { useGameStore } from "./src/stores/useGameStore";
 import TwemojiRocket from "./assets/twemoji/1f680.svg";
+import TwemojiTrophy from "./assets/twemoji/1f3c6.svg";
+
+// Prevent auto-hiding splash screen
+SplashScreen.preventAutoHideAsync();
+
+// Initialize Vexo analytics
+const vexoApiKey = Constants.expoConfig?.extra?.vexoApiKey;
+if (vexoApiKey) {
+  vexo(vexoApiKey);
+}
 import TwemojiCoin from "./assets/twemoji/1fa99.svg";
+import TwemojiWheel from "./assets/twemoji/1f6de.svg";
 import TwemojiBanknote from "./assets/twemoji/1f4b5.svg";
 import TwemojiFreezingFace from "./assets/twemoji/1f976.svg";
 import TwemojiHotFace from "./assets/twemoji/1f975.svg";
 import TwemojiSkull from "./assets/twemoji/1f480.svg";
 import type { ButtonVariant } from "./src/components/UiButton";
+import { UiButton } from "./src/components/UiButton";
 import { allPatterns, choosePattern } from "./src/patterns";
 import type { Candle } from "./src/types";
 import { createCandle, createTargetRunout } from "./src/utils";
+import * as GameCenter from "./src/services/GameCenterService";
 
 type ChartBar = {
   time: number;
@@ -44,6 +68,7 @@ type Position = {
   amount: number;
   side: "long" | "short";
   leverage: number;
+  entryTime: number;
 };
 
 type TradeToast = {
@@ -63,13 +88,16 @@ const LEVERAGE_OPTIONS = [
   { percent: 1, leverage: 50 },
 ];
 const MAINTENANCE_MARGIN = 0.005;
+const ROUND_DURATION_MS = 60_000;
+const ROUND_END_SLOW_TICK_MS = 300;
+const ROUND_END_SHEET_DELAY_MS = 900;
 
 const CHART_HTML = [
   "<!doctype html>",
   "<html>",
   "  <head>",
   '    <meta charset="utf-8" />',
-  '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+  '    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />',
   "    <style>",
   "      html, body { width: 100%; height: 100%; margin: 0; padding: 0; }",
   "      body { background: #ffffff; font-family: Arial, sans-serif; overflow: hidden; }",
@@ -103,6 +131,8 @@ const INJECTED_CHART_SCRIPT = `
   (function () {
     var overlay = document.getElementById("overlay");
     var container = document.getElementById("chart");
+    var readyInterval = null;
+
     function post(payload) {
       if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
         window.ReactNativeWebView.postMessage(JSON.stringify(payload));
@@ -224,6 +254,7 @@ const INJECTED_CHART_SCRIPT = `
           lineStyle: 0,
           priceLineVisible: false,
           lastValueVisible: false,
+          priceFormat: { type: "price", precision: 0, minMove: 1 },
         };
         if (typeof state.chart.addLineSeries === "function") {
           state.series = state.chart.addLineSeries(lineOptions);
@@ -247,6 +278,7 @@ const INJECTED_CHART_SCRIPT = `
           lineWidth: 2,
           priceLineVisible: false,
           lastValueVisible: false,
+          priceFormat: { type: "price", precision: 0, minMove: 1 },
         };
         if (typeof state.chart.addAreaSeries === "function") {
           state.series = state.chart.addAreaSeries(areaOptions);
@@ -281,6 +313,7 @@ const INJECTED_CHART_SCRIPT = `
           lineWidth: 2,
           priceLineVisible: false,
           lastValueVisible: false,
+          priceFormat: { type: "price", precision: 0, minMove: 1 },
         };
         if (typeof state.chart.addBaselineSeries === "function") {
           state.series = state.chart.addBaselineSeries(baselineOptions);
@@ -302,6 +335,7 @@ const INJECTED_CHART_SCRIPT = `
         borderVisible: false,
         wickUpColor: "#26a69a",
         wickDownColor: "#ef5350",
+        priceFormat: { type: "price", precision: 0, minMove: 1 },
       };
       if (typeof state.chart.addCandlestickSeries === "function") {
         state.series = state.chart.addCandlestickSeries(seriesOptions);
@@ -519,8 +553,16 @@ const INJECTED_CHART_SCRIPT = `
               background: { color: "#ffffff" },
               textColor: "#333333",
             },
-            rightPriceScale: { visible: true, autoScale: false },
-            timeScale: { timeVisible: true, secondsVisible: false },
+            rightPriceScale: { 
+              visible: true, 
+              autoScale: true,
+              scaleMargins: { top: 0.20, bottom: 0.20 } // Add padding for zoomed out view
+            },
+            timeScale: { 
+              timeVisible: true, 
+              secondsVisible: false,
+              barSpacing: 3 // Smaller = more zoomed out (default is ~6-8)
+            },
             grid: {
               vertLines: { color: "#f0f0f0" },
               horzLines: { color: "#f0f0f0" },
@@ -771,6 +813,10 @@ const INJECTED_CHART_SCRIPT = `
       }
     }
     window.__setChartData = function (data) {
+      if (readyInterval) {
+        clearInterval(readyInterval);
+        readyInterval = null;
+      }
       var count = Array.isArray(data) ? data.length : 0;
       post({ type: "debug", message: "inject:setData:" + count });
       if (!ensureChart()) {
@@ -869,6 +915,10 @@ const INJECTED_CHART_SCRIPT = `
       } catch (e) {
         post({ type: "error", message: "setChartType:" + String(e && e.message ? e.message : e) });
       }
+    };
+    window.__resizeChart = function () {
+      resizeChart();
+      post({ type: "debug", message: "resize:forced" });
     };
     window.__resetView = function () {
       if (!ensureChart()) {
@@ -1021,28 +1071,77 @@ const INJECTED_CHART_SCRIPT = `
     };
     window.addEventListener("message", handleMessage);
     document.addEventListener("message", handleMessage);
-    if (ensureChart()) {
-      post({ type: "ready" });
+
+    function waitForReady(attempts) {
+      if (window.ReactNativeWebView && window.LightweightCharts) {
+        if (ensureChart()) {
+          // Send ready signal immediately and then periodically until data arrives
+          post({ type: "ready" });
+          readyInterval = setInterval(function() {
+             post({ type: "ready" });
+          }, 500);
+        }
+        
+        if (state.pending) {
+          setData(state.pending);
+        } else {
+          showOverlay("Waiting for data...");
+        }
+        return;
+      }
+      
+      if (attempts > 0) {
+        setTimeout(function() { waitForReady(attempts - 1); }, 100);
+      } else {
+        showOverlay("Chart timeout: missing dependencies");
+        // Try to post error just in case bridge works now
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+           window.ReactNativeWebView.postMessage(JSON.stringify({ type: "error", message: "init-timeout" }));
+        }
+      }
     }
-    if (state.pending) {
-      setData(state.pending);
-    } else {
-      showOverlay("Waiting for data...");
-    }
+
+    // Try for 10 seconds (100 * 100ms)
+    waitForReady(100);
   })();
   true;
 `;
 
-export default function App() {
+function AppContent() {
+  const insets = useSafeAreaInsets();
+  const { isPro: isProReal, proPrice, purchasePro, restorePurchases, isLoading: isRevenueCatLoading } = useRevenueCat();
+  const [debugProOverride, setDebugProOverride] = useState(false);
+  const isPro = isProReal || debugProOverride; // Debug override for testing
+  const addScore = useGameStore((state) => state.addScore);
+  const recordRoundEnd = useGameStore((state) => state.recordRoundEnd);
+  const recordTrade = useGameStore((state) => state.recordTrade);
+  const recordLeverageUse = useGameStore((state) => state.recordLeverageUse);
   const webViewRef = useRef<WebView>(null);
   const candleIndexRef = useRef(0);
   const baseTimeRef = useRef<number | null>(null);
   const [isWebReady, setIsWebReady] = useState(false);
+  const [showAnimatedSplash, setShowAnimatedSplash] = useState(false);
   const [isChartFollowing, setIsChartFollowing] = useState(true);
   const [isMarginCallVisible, setIsMarginCallVisible] = useState(false);
+  const isMarginCallVisibleRef = useRef(false);
+  const [isTopScoreVisible, setIsTopScoreVisible] = useState(false);
+  const [isTotalStatsVisible, setIsTotalStatsVisible] = useState(false);
   const [marginCallVariant, setMarginCallVariant] = useState<MarginCallVariant>("classic");
   const [tickMs, setTickMs] = useState(TICK_MS);
   const marginCallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isRoundResultsVisible, setIsRoundResultsVisible] = useState(false);
+  const [isRoundEnded, setIsRoundEnded] = useState(false);
+  const isRoundResultsVisibleRef = useRef(false);
+  const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
+  const [roundSecondsRemaining, setRoundSecondsRemaining] = useState<number | null>(null);
+  const [isPatternSettingsVisible, setIsPatternSettingsVisible] = useState(false);
+  const [currentPatternLabel, setCurrentPatternLabel] = useState<string | null>(null);
+  const roundEndsAtRef = useRef<number | null>(null);
+  const roundStartNetWorthRef = useRef(0);
+  const roundStatsRef = useRef<RoundStats>({ tradesMade: 0, tradesWon: 0, tradesLost: 0, biggestWinPercent: 0, biggestLossPercent: 0, longestTrade: 0, closestToLiquidation: 100 });
+  const roundTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roundCountdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const roundRevealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isWebReadyRef = useRef(false);
   const latestChartDataRef = useRef<ChartBar[]>([]);
   const patternLinesRef = useRef<PatternLineIndex[]>([]);
@@ -1052,19 +1151,37 @@ export default function App() {
   const [enabledPatternIds, setEnabledPatternIds] = useState<string[]>(() => allPatterns.map((pattern) => pattern.id));
   const enabledPatternIdsRef = useRef<string[]>(allPatterns.map((pattern) => pattern.id));
   const [chartType, setChartType] = useState<ChartType>("candles");
-  const initialStackBalance = 10;
+  const initialStackBalance = isPro ? 110 : 100;
   const stackBalanceRef = useRef(initialStackBalance);
   const positionsRef = useRef<Position[]>([]);
+  const [positionCount, setPositionCount] = useState(0);  // Track position count for re-renders
   const [stackBalance, setStackBalance] = useState(initialStackBalance);
   const [useLeverage, setUseLeverage] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
+  const darkMode = useGameStore((state) => state.darkMode);
+  const setDarkMode = useGameStore((state) => state.setDarkMode);
   const [leverageIndex, setLeverageIndex] = useState(1);
   const [tradeToast, setTradeToast] = useState<TradeToast | null>(null);
+  const [showStartHint, setShowStartHint] = useState(false);
+  const [showPatternLines, setShowPatternLines] = useState(false);
+  const showPatternLinesRef = useRef(false);
   const [rocketBurstTrigger, setRocketBurstTrigger] = useState(0);
+  const [moneyPrinterTrigger, setMoneyPrinterTrigger] = useState(0);
   const toastTranslateY = useSharedValue(TOP_SHEET_OFFSET);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTradeLabelRef = useRef<string>("Trade");
+  const [isProFeaturesVisible, setIsProFeaturesVisible] = useState(false);
+
+  useEffect(() => {
+    // Top up balance if user becomes Pro and hasn't started trading yet (simple check)
+    // or just let them enjoy it on next round.
+    // For now, let's just ensure if they buy Pro mid-game, they get the boost if they are at the starting balance of 100.
+    if (isPro && stackBalanceRef.current === 100) {
+      const newBalance = 110;
+      setStackBalance(newBalance);
+      stackBalanceRef.current = newBalance;
+    }
+  }, [isPro]);
   const leverageOption = LEVERAGE_OPTIONS[leverageIndex] ?? LEVERAGE_OPTIONS[0];
   const wagerPercent = leverageOption.percent;
   const wagerPercentUsed = useLeverage ? 1 : wagerPercent;
@@ -1072,17 +1189,218 @@ export default function App() {
   const wagerOptionLabels = useLeverage
     ? LEVERAGE_OPTIONS.map((option) => `${option.leverage}x`)
     : LEVERAGE_OPTIONS.map((option) => `${Math.round(option.percent * 100)}%`);
-  const formatMoney = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const formatMoney = (value: number) => {
+    const absValue = Math.abs(value);
+    if (absValue < 100) {
+      return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  };
   const formatSignedMoney = (value: number) => {
     const absValue = Math.abs(value);
     const prefix = value > 0 ? "+$" : value < 0 ? "-$" : "$";
     return `${prefix}${formatMoney(absValue)}`;
   };
-  const normalizeBalance = (value: number) => Math.max(0, Math.round(value));
-  const wagerAmount = wagerPercentUsed === 1 ? stackBalance : Math.floor(stackBalance * wagerPercentUsed);
+  const normalizeBalance = (value: number) => {
+    const clamped = Math.max(0, value);
+    if (clamped >= 100) {
+      return Math.round(clamped);
+    }
+    return Math.round(clamped * 100) / 100;
+  };
+
+  const computeOpenProceeds = (price: number) => {
+    const positions = positionsRef.current;
+    if (!positions.length) {
+      return 0;
+    }
+    return positions.reduce((sum, position) => {
+      const pnl = position.side === "long" ? (price - position.entryPrice) * position.units : (position.entryPrice - price) * position.units;
+      return sum + position.amount + pnl;
+    }, 0);
+  };
+
+  const computeNetWorth = (price: number) => stackBalanceRef.current + computeOpenProceeds(price);
+
+  const clearRoundTimers = () => {
+    if (roundTimeoutRef.current) {
+      clearTimeout(roundTimeoutRef.current);
+      roundTimeoutRef.current = null;
+    }
+    if (roundCountdownIntervalRef.current) {
+      clearInterval(roundCountdownIntervalRef.current);
+      roundCountdownIntervalRef.current = null;
+    }
+    if (roundRevealTimeoutRef.current) {
+      clearTimeout(roundRevealTimeoutRef.current);
+      roundRevealTimeoutRef.current = null;
+    }
+  };
+
+  const resetRoundState = () => {
+    clearRoundTimers();
+    roundEndsAtRef.current = null;
+    roundStartNetWorthRef.current = 0;
+    roundStatsRef.current = { tradesMade: 0, tradesWon: 0, tradesLost: 0, biggestWinPercent: 0, biggestLossPercent: 0, longestTrade: 0, closestToLiquidation: 100 };
+    setRoundSecondsRemaining(null);
+    setIsRoundResultsVisible(false);
+    setIsRoundEnded(false);
+  };
+
+  const closeAllPositionsAtPrice = (price: number, options: { showToast: boolean }) => {
+    if (positionsRef.current.length === 0) {
+      return;
+    }
+    const costBasis = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
+    const earliestEntry = Math.min(...positionsRef.current.map((p) => p.entryTime));
+    const tradeDuration = Date.now() - earliestEntry;
+    const proceeds = computeOpenProceeds(price);
+    const profit = proceeds - costBasis;
+    // In training wheels mode, don't update the actual balance
+    const nextBalance = showPatternLinesRef.current 
+      ? stackBalanceRef.current 
+      : normalizeBalance(stackBalanceRef.current + proceeds);
+    stackBalanceRef.current = nextBalance;
+    positionsRef.current = [];
+    setPositionCount(0);
+    setStackBalance(nextBalance);
+    sendPatternLines();
+    webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("sell"); true;`);
+
+    // Track trade stats during sprint round
+    if (roundEndsAtRef.current && costBasis > 0) {
+      const profitPercent = (profit / costBasis) * 100;
+      roundStatsRef.current.tradesMade += 1;
+      roundStatsRef.current.longestTrade = Math.max(roundStatsRef.current.longestTrade, tradeDuration);
+      if (profit > 0) {
+        roundStatsRef.current.tradesWon += 1;
+        roundStatsRef.current.biggestWinPercent = Math.max(roundStatsRef.current.biggestWinPercent, profitPercent);
+      } else if (profit < 0) {
+        roundStatsRef.current.tradesLost += 1;
+        roundStatsRef.current.biggestLossPercent = Math.max(roundStatsRef.current.biggestLossPercent, Math.abs(profitPercent));
+      }
+
+      // Record lifetime trade stats (if not training wheels)
+      if (!showPatternLinesRef.current) {
+        recordTrade(profit > 0, profit, profitPercent);
+      }
+    }
+
+    if (options.showToast && costBasis > 0) {
+      const percent = (profit / costBasis) * 100;
+      const kind = profit > 0 ? "profit" : profit < 0 ? "loss" : "flat";
+      showTradeToast({ amount: profit, percent, kind });
+    }
+  };
+
+  const endSprintRound = () => {
+    const endsAt = roundEndsAtRef.current;
+    if (!endsAt) {
+      return;
+    }
+    clearRoundTimers();
+    setRoundSecondsRemaining(null);
+
+    if (isMarginCallVisibleRef.current || isRoundResultsVisibleRef.current) {
+      roundEndsAtRef.current = null;
+      return;
+    }
+
+    // Immediately disable trading
+    setIsRoundEnded(true);
+
+    const price = getCurrentPrice() ?? BASE_PRICE;
+    const startNetWorth = roundStartNetWorthRef.current || normalizeBalance(computeNetWorth(price));
+    const endNetWorth = normalizeBalance(computeNetWorth(price));
+    const profit = endNetWorth - startNetWorth;
+    const percent = startNetWorth > 0 ? (profit / startNetWorth) * 100 : 0;
+
+    // Close positions BEFORE clearing roundEndsAtRef so stats are tracked
+    if (positionsRef.current.length) {
+      closeAllPositionsAtPrice(price, { showToast: false });
+    }
+
+    // Now clear the ref after positions are closed
+    roundEndsAtRef.current = null;
+
+    setRoundResult({ startNetWorth, endNetWorth, profit, percent, durationMs: ROUND_DURATION_MS, stats: { ...roundStatsRef.current } });
+    setTickMs(ROUND_END_SLOW_TICK_MS);
+
+    // Submit score to Game Center
+    GameCenter.submitScore(GameCenter.LEADERBOARDS.HIGH_SCORE, endNetWorth);
+
+    // Save score to local leaderboard
+    addScore(endNetWorth);
+
+    // Record lifetime stats (only for real rounds, not training wheels)
+    if (!showPatternLinesRef.current) {
+      recordRoundEnd({
+        tradesWon: roundStatsRef.current.tradesWon,
+        tradesLost: roundStatsRef.current.tradesLost,
+        profitAmount: profit,
+        biggestWinPercent: roundStatsRef.current.biggestWinPercent,
+        biggestLossPercent: roundStatsRef.current.biggestLossPercent,
+        wasLiquidated: false,
+        closestToLiquidation: roundStatsRef.current.closestToLiquidation,
+        durationMs: ROUND_DURATION_MS,
+      });
+    }
+
+    roundRevealTimeoutRef.current = setTimeout(() => {
+      if (!isMarginCallVisibleRef.current) {
+        setIsRoundResultsVisible(true);
+      }
+      roundRevealTimeoutRef.current = null;
+    }, ROUND_END_SHEET_DELAY_MS);
+  };
+
+  const startSprintRoundIfNeeded = (price: number) => {
+    if (roundEndsAtRef.current) {
+      return;
+    }
+    if (isMarginCallVisibleRef.current || isRoundResultsVisibleRef.current) {
+      return;
+    }
+    // Block game start if training wheels are ON (Pro feature)
+    if (showPatternLinesRef.current) {
+      return;
+    }
+    roundStartNetWorthRef.current = normalizeBalance(computeNetWorth(price));
+    const endsAt = Date.now() + ROUND_DURATION_MS;
+    roundEndsAtRef.current = endsAt;
+
+    setRoundSecondsRemaining(Math.ceil(ROUND_DURATION_MS / 1000));
+    if (roundCountdownIntervalRef.current) {
+      clearInterval(roundCountdownIntervalRef.current);
+    }
+    roundCountdownIntervalRef.current = setInterval(() => {
+      const msLeft = Math.max(0, (roundEndsAtRef.current ?? endsAt) - Date.now());
+      setRoundSecondsRemaining(Math.ceil(msLeft / 1000));
+      
+      
+      if (showStartHint) setShowStartHint(false);
+
+      if (msLeft <= 0) {
+        const interval = roundCountdownIntervalRef.current;
+        if (interval) clearInterval(interval);
+        roundCountdownIntervalRef.current = null;
+      }
+    }, 200);
+
+    if (roundTimeoutRef.current) {
+      clearTimeout(roundTimeoutRef.current);
+    }
+    roundTimeoutRef.current = setTimeout(() => {
+      roundTimeoutRef.current = null;
+      endSprintRound();
+    }, ROUND_DURATION_MS);
+  };
+
+  const wagerAmountRaw = wagerPercentUsed === 1 ? stackBalance : stackBalance * wagerPercentUsed;
+  const wagerAmount = stackBalance >= 100 ? Math.floor(wagerAmountRaw) : Math.round(wagerAmountRaw * 100) / 100;
   const hasPositions = positionsRef.current.length > 0;
   const lockedSide = positionsRef.current[0]?.side ?? null;
-  const canBuy = wagerAmount >= 1;
+  const canBuy = wagerAmount >= 0.01;
   const canOpenLong = !useLeverage || !lockedSide || lockedSide === "long";
   const canOpenShort = useLeverage && (!lockedSide || lockedSide === "short");
   const primarySide = lockedSide ?? "long";
@@ -1093,6 +1411,35 @@ export default function App() {
     const data = latestChartDataRef.current;
     return data.length ? data[data.length - 1].close : null;
   };
+
+  useEffect(() => {
+    isMarginCallVisibleRef.current = isMarginCallVisible;
+  }, [isMarginCallVisible]);
+
+  useEffect(() => {
+    isRoundResultsVisibleRef.current = isRoundResultsVisible;
+  }, [isRoundResultsVisible]);
+
+  const [gameCenterPlayer, setGameCenterPlayer] = useState<GameCenter.GameCenterPlayer | null>(null);
+
+  // Authenticate with Game Center on app launch
+  useEffect(() => {
+    console.log("Attempting Game Center authentication...");
+    GameCenter.authenticate().then((player) => {
+      console.log("Game Center auth result:", JSON.stringify(player, null, 2));
+      if (player.isAuthenticated) {
+        console.log("Game Center authenticated successfully:", player.displayName);
+        setGameCenterPlayer(player);
+        // Hide the toast after 4 seconds
+        setTimeout(() => setGameCenterPlayer(null), 4000);
+      } else {
+        console.log("Game Center authentication failed or user cancelled.");
+      }
+    }).catch(error => {
+      console.error("Game Center authentication error in App.tsx:", error);
+    });
+  }, []);
+
   const chartTheme = useMemo(
     () => ({
       background: darkMode ? "#0d0f12" : "#ffffff",
@@ -1128,11 +1475,32 @@ export default function App() {
     liquidationPrice = Math.max(MIN_PRICE, Math.min(MAX_PRICE, liquidationPrice));
     return { price: liquidationPrice, side };
   };
+
+  useEffect(() => {
+    // Show start hint if we are idle and no other overlays are active
+    if (roundSecondsRemaining === null && !isMarginCallVisible && !isRoundResultsVisible && !isPatternSettingsVisible && !isTopScoreVisible && !isProFeaturesVisible) {
+      const t = setTimeout(() => setShowStartHint(true), 2000);
+      return () => clearTimeout(t);
+    } else {
+      setShowStartHint(false);
+    }
+  }, [roundSecondsRemaining, isMarginCallVisible, isRoundResultsVisible, isPatternSettingsVisible, isTopScoreVisible, isProFeaturesVisible]);
+
   const showTradeToast = (toast: TradeToast) => {
     setTradeToast(toast);
-    // Rocket fly-by is the top/last profit tier.
-    if (toast.kind === "profit" && toast.percent >= 500) {
-      setRocketBurstTrigger(Date.now());
+    // Haptic feedback based on toast type
+    if (toast.kind === "profit") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (toast.kind === "loss" || toast.kind === "liquidation") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    // Animation triggers based on profit magnitude
+    if (toast.kind === "profit") {
+      if (toast.percent >= 500) {
+        setMoneyPrinterTrigger(Date.now());
+      } else if (toast.percent >= 250) {
+        setRocketBurstTrigger(Date.now());
+      }
     }
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
@@ -1145,59 +1513,91 @@ export default function App() {
       easing: Easing.out(Easing.cubic),
     });
     toastTimeoutRef.current = setTimeout(() => {
-      toastTranslateY.value = withTiming(
-        TOP_SHEET_OFFSET,
-        {
-          duration: 220,
-          easing: Easing.in(Easing.cubic),
-        }
-      );
+      toastTranslateY.value = withTiming(TOP_SHEET_OFFSET, {
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+      });
       toastHideTimeoutRef.current = setTimeout(() => {
         setTradeToast(null);
       }, 240);
     }, 2400);
   };
+
+  const handleBuyPro = async () => {
+    const success = await purchasePro();
+    if (success) {
+      setIsProFeaturesVisible(false);
+      // Optional: Show celebration or thank you
+    }
+  };
+
   const openSettings = () => {
-    const options = darkMode ? ["Disable Dark Mode", "Cancel"] : ["Enable Dark Mode", "Cancel"];
-    const onSelect = (index: number) => {
-      if (index === 0) {
-        setDarkMode((prev) => !prev);
+    const darkModeOption = darkMode ? "Disable Dark Mode 🌙" : "Enable Dark Mode 🌙";
+    const buyProOption = proPrice ? `Buy PRO ✨ (${proPrice})` : "Buy PRO ✨";
+    const topScoresOption = "My top Scores 🏆";
+    const debugProOption = debugProOverride ? "🔧 Disable Debug Pro" : "🔧 Enable Debug Pro";
+    const options = [topScoresOption, "Total Stats 📊"];
+    if (isPro) {
+        options.push(darkModeOption);
+    } else {
+        options.push(buyProOption, "Restore Purchases");
+    }
+
+    if (__DEV__) {
+        options.push(debugProOption);
+    }
+    options.push("Cancel");
+    const cancelIndex = options.length - 1;
+
+    const onSelect = async (index: number) => {
+      if (options[index] === darkModeOption) {
+        setDarkMode(!darkMode);
+      } else if (options[index] === topScoresOption) {
+        setIsTopScoreVisible(true);
+      } else if (options[index] === "Total Stats 📊") {
+        setIsTotalStatsVisible(true);
+      } else if (options[index] === buyProOption) {
+        setIsProFeaturesVisible(true);
+      } else if (options[index] === "Restore Purchases") {
+        await restorePurchases();
+      } else if (options[index] === debugProOption) {
+        setDebugProOverride((prev) => !prev);
       }
     };
+
     if (Platform.OS === "ios") {
       ActionSheetIOS.showActionSheetWithOptions(
         {
+          title: isPro ? "Pro Member 🏆" : undefined,
           options,
-          cancelButtonIndex: 1,
+          cancelButtonIndex: cancelIndex,
           userInterfaceStyle: darkMode ? "dark" : "light",
         },
         onSelect
       );
     } else {
-      Alert.alert("Settings", "Dark mode", [
-        { text: options[0], onPress: () => onSelect(0) },
-        { text: "Cancel", style: "cancel" },
-      ]);
+      const alertButtons = options.slice(0, -1).map((opt, i) => ({
+        text: opt,
+        onPress: () => onSelect(i),
+      }));
+      alertButtons.push({ text: "Cancel", onPress: () => {} });
+      Alert.alert("Settings", "Choose an option", alertButtons);
     }
   };
 
-  const testRocketToast = () => {
-    lastTradeLabelRef.current = "Test";
-    showTradeToast({ kind: "profit", amount: 999, percent: 500 });
-  };
 
   const pickMarginCallVariant = (): MarginCallVariant => {
     const roll = Math.random();
-    if (roll < 0.34) return "incomingCall";
-    if (roll < 0.67) return "breakingNews";
+    if (roll < 0.20) return "incomingCall";
+    if (roll < 0.40) return "breakingNews";
+    if (roll < 0.60) return "instruction";
+    if (roll < 0.80) return "mirror";
     return "classic";
   };
 
   const applyChartType = (nextType: ChartType) => {
     setChartType(nextType);
-    webViewRef.current?.injectJavaScript(
-      `window.__setChartType && window.__setChartType(${JSON.stringify(nextType)}); true;`
-    );
+    webViewRef.current?.injectJavaScript(`window.__setChartType && window.__setChartType(${JSON.stringify(nextType)}); true;`);
   };
 
   const resetChartView = () => {
@@ -1221,10 +1621,12 @@ export default function App() {
     setTradeToast(null);
 
     setIsMarginCallVisible(false);
+    resetRoundState();
 
     stackBalanceRef.current = initialStackBalance;
     setStackBalance(initialStackBalance);
     positionsRef.current = [];
+    setPositionCount(0);
 
     patternQueueRef.current = [];
     targetQueueRef.current = [];
@@ -1246,8 +1648,22 @@ export default function App() {
     sendFullChartData();
     sendPatternLines();
   };
+
+  const toggleUseLeverage = () => {
+    setUseLeverage((prev) => !prev);
+  };
+
+  const dismissRoundResults = () => {
+    setTickMs(TICK_MS);
+    resetRoundState();
+    stackBalanceRef.current = initialStackBalance;
+    setStackBalance(initialStackBalance);
+    positionsRef.current = [];
+    setPositionCount(0);
+  };
+
   const handleBuy = (sideOverride?: "long" | "short") => {
-    if (isMarginCallVisible) {
+    if (isMarginCallVisible || isRoundResultsVisible) {
       return;
     }
     const price = getCurrentPrice();
@@ -1263,16 +1679,27 @@ export default function App() {
       return;
     }
     const balance = stackBalanceRef.current;
-    const amount = wagerPercentUsed === 1 ? balance : Math.floor(balance * wagerPercentUsed);
-    if (amount < 1) {
+    const amountRaw = wagerPercentUsed === 1 ? balance : balance * wagerPercentUsed;
+    const amount = balance >= 100 ? Math.floor(amountRaw) : Math.round(amountRaw * 100) / 100;
+    if (amount < 0.01) {
       return;
     }
+    startSprintRoundIfNeeded(price);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const positionSize = amount * leverage;
     const units = positionSize / price;
-    const nextBalance = normalizeBalance(balance - amount);
-    stackBalanceRef.current = nextBalance;
-    positionsRef.current = [...positionsRef.current, { entryPrice: price, units, amount, side, leverage }];
-    setStackBalance(nextBalance);
+    positionsRef.current = [...positionsRef.current, { entryPrice: price, units, amount, side, leverage, entryTime: Date.now() }];
+    setPositionCount(positionsRef.current.length);  // Always update for re-render
+    // In training wheels mode, don't update the actual balance or stats
+    if (!showPatternLinesRef.current) {
+      const nextBalance = normalizeBalance(balance - amount);
+      stackBalanceRef.current = nextBalance;
+      setStackBalance(nextBalance);
+      // Track leverage usage (only for leveraged trades, not spot)
+      if (leverage > 1) {
+        recordLeverageUse(leverage);
+      }
+    }
     sendPatternLines();
     const markerSide = useLeverage ? side : "buy";
     webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("${markerSide}"); true;`);
@@ -1282,33 +1709,15 @@ export default function App() {
     lastTradeLabelRef.current = useLeverage ? `${labelSide} ${labelLev}` : `${labelSide} | ${labelLev}`;
   };
   const handleSell = () => {
-    if (isMarginCallVisible) {
+    if (isMarginCallVisible || isRoundResultsVisible) {
       return;
     }
     const price = getCurrentPrice();
     if (!price || !Number.isFinite(price)) {
       return;
     }
-    if (positionsRef.current.length === 0) {
-      return;
-    }
-    const costBasis = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
-    const proceeds = positionsRef.current.reduce((sum, position) => {
-      const pnl = position.side === "long" ? (price - position.entryPrice) * position.units : (position.entryPrice - price) * position.units;
-      return sum + position.amount + pnl;
-    }, 0);
-    const profit = proceeds - costBasis;
-    const nextBalance = normalizeBalance(stackBalanceRef.current + proceeds);
-    stackBalanceRef.current = nextBalance;
-    positionsRef.current = [];
-    setStackBalance(nextBalance);
-    sendPatternLines();
-    webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("sell"); true;`);
-    if (costBasis > 0) {
-      const percent = (profit / costBasis) * 100;
-      const kind = profit > 0 ? "profit" : profit < 0 ? "loss" : "flat";
-      showTradeToast({ amount: profit, percent, kind });
-    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    closeAllPositionsAtPrice(price, { showToast: true });
   };
   const togglePattern = (id: string) => {
     setEnabledPatternIds((prev) => (prev.includes(id) ? prev.filter((patternId) => patternId !== id) : [...prev, id]));
@@ -1369,22 +1778,27 @@ export default function App() {
     const lastIndex = candles[candles.length - 1]?.index ?? candles.length - 1;
     const firstIndex = candles[0]?.index ?? 0;
     const baseTime = baseTimeRef.current ?? Math.floor(Date.now() / 1000) - lastIndex * 60;
-    const lines = patternLinesRef.current.map((line) => ({
+    
+    // Only include pattern lines if training wheels is enabled
+    const lines = showPatternLinesRef.current ? patternLinesRef.current.map((line) => ({
       id: line.id,
       kind: line.kind,
       points: [
         { time: Math.floor(baseTime + line.startIndex * 60), value: line.startPrice },
         { time: Math.floor(baseTime + line.endIndex * 60), value: line.endPrice },
       ],
-    }));
+    })) : [];
     const liquidation = getLiquidationPrice();
     if (liquidation) {
+      // Extend line far beyond visible range to ensure full-width rendering
+      const farPast = baseTime - 365 * 24 * 60 * 60; // 1 year before
+      const farFuture = baseTime + lastIndex * 60 + 365 * 24 * 60 * 60; // 1 year after
       lines.push({
         id: "liquidation-line",
         kind: "resistance",
         points: [
-          { time: Math.floor(baseTime + firstIndex * 60), value: liquidation.price },
-          { time: Math.floor(baseTime + lastIndex * 60), value: liquidation.price },
+          { time: farPast, value: liquidation.price },
+          { time: farFuture, value: liquidation.price },
         ],
       });
     }
@@ -1454,6 +1868,15 @@ export default function App() {
 
   useEffect(() => {
     isWebReadyRef.current = isWebReady;
+    if (isWebReady) {
+      setTimeout(() => {
+        setShowAnimatedSplash(true);
+        // Small delay to let AnimatedSplash mount before revealing
+        requestAnimationFrame(() => {
+          SplashScreen.hideAsync();
+        });
+      }, 1000);
+    }
   }, [isWebReady]);
 
   useEffect(() => {
@@ -1488,8 +1911,10 @@ export default function App() {
       let shouldUpdateLines = false;
       if (patternQueueRef.current.length === 0 && targetQueueRef.current.length === 0) {
         if (!hasSpawnedPattern.current || Math.random() < PATTERN_SPAWN_CHANCE) {
-          const enabledIds = enabledPatternIdsRef.current;
+          const isTraining = showPatternLinesRef.current;
+          const enabledIds = isTraining ? enabledPatternIdsRef.current : undefined;
           const pattern = choosePattern(lastClose, enabledIds);
+          setCurrentPatternLabel(pattern?.label ?? null);
           if (pattern) {
             const result = pattern.generate(lastClose);
             patternQueueRef.current = result.candles;
@@ -1547,13 +1972,36 @@ export default function App() {
         }
       }
 
-      if (positionsRef.current.length) {
+      if (positionsRef.current.length && roundEndsAtRef.current) {
         const liquidation = getLiquidationPrice();
         if (liquidation) {
+          // Calculate distance to liquidation as percentage
+          const distanceToLiq = liquidation.side === "long"
+            ? ((bar.close - liquidation.price) / liquidation.price) * 100
+            : ((liquidation.price - bar.close) / liquidation.price) * 100;
+          // Track the closest we got to liquidation (lower = closer)
+          if (distanceToLiq < roundStatsRef.current.closestToLiquidation) {
+            roundStatsRef.current.closestToLiquidation = Math.max(0, distanceToLiq);
+          }
+          
           const isLiquidated = liquidation.side === "long" ? bar.close <= liquidation.price : bar.close >= liquidation.price;
           if (isLiquidated) {
+            roundStatsRef.current.closestToLiquidation = 0; // Liquidated = 0%
+            // Capture the leverage of the first position for liquidation stats
+            const liquidatedLeverage = positionsRef.current[0]?.leverage ?? 0;
+            // Count all liquidated positions as trades lost
+            const liquidatedPositionCount = positionsRef.current.length;
+            roundStatsRef.current.tradesLost += liquidatedPositionCount;
+            
+            // Capture stats BEFORE resetRoundState resets them
+            const capturedStats = { ...roundStatsRef.current };
+            const capturedRoundEndsAt = roundEndsAtRef.current;
             const margin = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
+            
+            resetRoundState();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             positionsRef.current = [];
+            setPositionCount(0);
             webViewRef.current?.injectJavaScript(`window.__clearTrades && window.__clearTrades(); true;`);
             showTradeToast({ kind: "liquidation", amount: -margin, percent: -100 });
             setTickMs(300);
@@ -1564,6 +2012,21 @@ export default function App() {
               setMarginCallVariant(pickMarginCallVariant());
               setIsMarginCallVisible(true);
               marginCallTimeoutRef.current = null;
+              
+              // Record liquidation in lifetime stats (only for real rounds, not training wheels)
+              if (!showPatternLinesRef.current) {
+                recordRoundEnd({
+                  tradesWon: capturedStats.tradesWon,
+                  tradesLost: capturedStats.tradesLost,
+                  profitAmount: -margin,
+                  biggestWinPercent: capturedStats.biggestWinPercent,
+                  biggestLossPercent: capturedStats.biggestLossPercent,
+                  wasLiquidated: true,
+                  closestToLiquidation: 0,
+                  durationMs: capturedRoundEndsAt ? (Date.now() - (capturedRoundEndsAt - ROUND_DURATION_MS)) : ROUND_DURATION_MS,
+                  liquidationLeverage: liquidatedLeverage,
+                });
+              }
             }, 900);
             shouldUpdateLines = true;
           }
@@ -1587,6 +2050,15 @@ export default function App() {
     webViewRef.current?.injectJavaScript(`window.__setChartTheme && window.__setChartTheme(${themePayload}); true;`);
   }, [chartTheme, isWebReady]);
 
+  // Update chart when training wheels toggle changes
+  useEffect(() => {
+    showPatternLinesRef.current = showPatternLines;
+    if (!isWebReady) {
+      return;
+    }
+    sendPatternLines();
+  }, [showPatternLines, isWebReady]);
+
   const toastTitle = tradeToast ? `${lastTradeLabelRef.current}  ${formatSignedMoney(tradeToast.amount)}` : "";
   const toastSubtitle = tradeToast
     ? tradeToast.kind === "liquidation"
@@ -1597,7 +2069,7 @@ export default function App() {
     : "";
   const toastBackgroundAccessory =
     tradeToast?.kind === "profit" ? (
-      tradeToast.percent >= 500 ? null : tradeToast.percent >= 100 ? (
+      tradeToast.percent >= 250 ? null : tradeToast.percent >= 100 ? (
         <View pointerEvents="none" style={styles.profitToastBanknotes}>
           <TwemojiBanknote width={92} height={92} style={styles.profitToastBanknote1} />
           <TwemojiBanknote width={86} height={86} style={styles.profitToastBanknote2} />
@@ -1638,7 +2110,7 @@ export default function App() {
       : null;
 
   return (
-    <SafeAreaProvider>
+    <>
       <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, darkMode && styles.containerDark]}>
         <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
         <ProfitToast
@@ -1650,8 +2122,32 @@ export default function App() {
           backgroundAccessory={toastBackgroundAccessory}
           subtitleStyle={toastSubtitleStyle}
           styles={styles}
-          rocketBurstTrigger={tradeToast?.kind === "profit" && tradeToast.percent >= 500 ? rocketBurstTrigger : 0}
+          rocketBurstTrigger={tradeToast?.kind === "profit" && tradeToast.percent >= 250 && tradeToast.percent < 500 ? rocketBurstTrigger : 0}
+          moneyPrinterTrigger={tradeToast?.kind === "profit" && tradeToast.percent >= 500 ? moneyPrinterTrigger : 0}
         />
+        {/* Game Center Welcome Toast */}
+        {gameCenterPlayer?.isAuthenticated && (
+           <Animated.View 
+             entering={FadeIn.delay(500).duration(500)} 
+             exiting={FadeOut.duration(500)}
+             style={{ 
+               position: 'absolute', 
+               top: insets.top + 60, 
+               alignSelf: 'center', 
+               backgroundColor: darkMode ? 'rgba(30,30,30,0.9)' : 'rgba(255,255,255,0.9)', 
+               paddingVertical: 8, 
+               paddingHorizontal: 16, 
+               borderRadius: 20, 
+               zIndex: 100,
+               borderWidth: 1,
+               borderColor: darkMode ? '#333' : '#ddd',
+             }}
+           >
+             <Text style={{ color: darkMode ? '#fff' : '#000', fontSize: 13, fontWeight: '600' }}>
+               🎮 Signed in as {gameCenterPlayer.displayName}
+             </Text>
+           </Animated.View>
+        )}
         <StackBar
           stackBalance={stackBalance}
           formatMoney={formatMoney}
@@ -1659,22 +2155,19 @@ export default function App() {
           leverage={leverage}
           wagerPercentUsed={wagerPercentUsed}
           wagerAmount={wagerAmount}
+          roundSecondsRemaining={roundSecondsRemaining}
           darkMode={darkMode}
-          isChartFollowing={isChartFollowing}
           chartType={chartType}
-          resetChartView={resetChartView}
           setChartType={applyChartType}
-          onTestRocketToast={testRocketToast}
           openSettings={openSettings}
-          minorVariant={minorVariant}
-          styles={styles}
-        />
-        <PatternBar
-          patterns={allPatterns}
-          enabledPatternIds={enabledPatternIds}
-          togglePattern={togglePattern}
-          darkMode={darkMode}
-          majorVariant={majorVariant}
+          openPatterns={() => {
+            if (isPro) {
+              setIsPatternSettingsVisible(true);
+            } else {
+              setIsProFeaturesVisible(true);
+            }
+          }}
+          openLeaderboard={() => GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE)}
           minorVariant={minorVariant}
           styles={styles}
         />
@@ -1686,6 +2179,8 @@ export default function App() {
             style={styles.webView}
             javaScriptEnabled
             domStorageEnabled
+            scrollEnabled={false}
+            bounces={false}
             onMessage={handleWebMessage}
             injectedJavaScript={INJECTED_CHART_SCRIPT}
             onLoadStart={() => {
@@ -1707,28 +2202,163 @@ export default function App() {
               webViewRef.current?.reload();
             }}
           />
+          {typeof roundSecondsRemaining === "number" && (
+            <View style={[styles.floatingTimer, darkMode && styles.floatingTimerDark]}>
+              <Text style={[styles.floatingTimerText, darkMode && styles.floatingTimerTextDark]}>{Math.max(0, roundSecondsRemaining)}s</Text>
+            </View>
+          )}
+          {!isChartFollowing && (
+            <UiButton
+              title="⎋ Follow Price"
+              onPress={resetChartView}
+              variant="borderedProminent"
+              color="#1a9f7a"
+              controlSize="small"
+              style={styles.floatingFollowButton}
+              darkMode={darkMode}
+            />
+          )}
           <BottomControls
             darkMode={darkMode}
             useLeverage={useLeverage}
-            toggleUseLeverage={() => setUseLeverage((prev) => !prev)}
+            toggleUseLeverage={toggleUseLeverage}
             majorVariant={majorVariant}
             minorVariant={minorVariant}
             wagerOptionLabels={wagerOptionLabels}
             leverageIndex={leverageIndex}
             onSelectLeverageIndex={setLeverageIndex}
-            hasPositions={hasPositions}
-            primaryIsShort={primaryIsShort}
-            primarySide={primarySide}
+            hasPositions={positionsRef.current.length > 0}
+            primaryIsShort={positionsRef.current[0]?.side === "short"}
+            primarySide={positionsRef.current[0]?.side ?? "long"}
             canBuy={canBuy}
             canOpenLong={canOpenLong}
             canOpenShort={canOpenShort}
             onBuy={handleBuy}
             onSell={handleSell}
+            disabled={isRoundEnded || isRoundResultsVisible || isMarginCallVisible || (typeof roundSecondsRemaining === "number" && roundSecondsRemaining <= 0)}
             styles={styles}
           />
+
+          {showStartHint && (
+            <Animated.View
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              pointerEvents={showPatternLines ? "auto" : "none"}
+              style={{ position: 'absolute', top: 10, left: 12, right: 12, alignItems: 'center', zIndex: 10 }}
+            >
+              <Pressable
+                disabled={!showPatternLines}
+                onPress={() => {
+                  if (showPatternLines) {
+                    setShowPatternLines(false);
+                    setStackBalance(initialStackBalance);
+                    stackBalanceRef.current = initialStackBalance;
+                  }
+                }}
+                style={[styles.startHintContainer, darkMode && styles.startHintContainerDark, { position: 'relative', top: 0, left: 0, right: 0, width: '100%' }]}
+              >
+                <View pointerEvents="none" style={styles.startHintCoins}>
+                  {showPatternLines ? (
+                    <>
+                      <TwemojiWheel width={72} height={72} style={styles.startHintCoin1} />
+                      <TwemojiWheel width={64} height={64} style={styles.startHintCoin2} />
+                      <TwemojiWheel width={56} height={56} style={styles.startHintCoin3} />
+                    </>
+                  ) : (
+                    <>
+                      <TwemojiCoin width={72} height={72} style={styles.startHintCoin1} />
+                      <TwemojiCoin width={64} height={64} style={styles.startHintCoin2} />
+                      <TwemojiCoin width={56} height={56} style={styles.startHintCoin3} />
+                    </>
+                  )}
+                </View>
+                <View style={[styles.startHintContent, { width: '100%', alignItems: 'center' }]}>
+                  <Text style={[styles.startHintKicker, darkMode && styles.startHintKickerDark, { textAlign: 'center' }]}>
+                    {showPatternLines ? "Training Wheels ON" : "Ready to trade?"}
+                  </Text>
+                  <Text style={[styles.startHintText, darkMode && styles.startHintTextDark, { textAlign: 'center' }]}>
+                    {showPatternLines ? "Tap to turn off & start playing" : "Hit BUY to start your 60s sprint!"}
+                  </Text>
+                </View>
+              </Pressable>
+
+              {showPatternLines && currentPatternLabel && (
+                <View style={{ marginTop: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12 }}>
+                  <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600", textAlign: "center" }}>
+                    Forming: {currentPatternLabel}
+                  </Text>
+                </View>
+              )}
+            </Animated.View>
+          )}
+
         </View>
-        <MarginCallOverlay visible={isMarginCallVisible} darkMode={darkMode} variant={marginCallVariant} onTryAgain={resetRun} />
+        <RoundResultsSheet
+          visible={isRoundResultsVisible}
+          result={roundResult}
+          darkMode={darkMode}
+          onShowLeaderboard={() => GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE)}
+          onNextRound={() => {
+            setIsRoundResultsVisible(false);
+            isRoundResultsVisibleRef.current = false;
+            dismissRoundResults();
+          }}
+        />
+        <MarginCallOverlay
+          visible={isMarginCallVisible}
+          darkMode={darkMode}
+          variant={marginCallVariant}
+          onTryAgain={resetRun}
+        />
+        <PatternSettingsModal
+          visible={isPatternSettingsVisible}
+          darkMode={darkMode}
+          patterns={allPatterns}
+          enabledPatternIds={enabledPatternIds}
+          togglePattern={togglePattern}
+          showPatternLines={showPatternLines}
+          onTogglePatternLines={() => {
+            setShowPatternLines((prev) => {
+              // If turning OFF training wheels, reset the money stack
+              if (prev === true) {
+                setStackBalance(initialStackBalance);
+                stackBalanceRef.current = initialStackBalance;
+              }
+              return !prev;
+            });
+          }}
+          onClose={() => setIsPatternSettingsVisible(false)}
+        />
+        <TopScoreModal
+          visible={isTopScoreVisible}
+          darkMode={darkMode}
+          onClose={() => setIsTopScoreVisible(false)}
+        />
+        <TotalStatsModal
+          visible={isTotalStatsVisible}
+          darkMode={darkMode}
+          onClose={() => setIsTotalStatsVisible(false)}
+        />
+        <ProFeaturesModal
+          visible={isProFeaturesVisible}
+          darkMode={darkMode}
+          price={proPrice}
+          onBuy={handleBuyPro}
+          onClose={() => setIsProFeaturesVisible(false)}
+          isPurchasing={isRevenueCatLoading}
+        />
       </SafeAreaView>
+      {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <SafeAreaProvider style={styles.container}>
+      <RevenueCatProvider>
+        <AppContent />
+      </RevenueCatProvider>
     </SafeAreaProvider>
   );
 }
@@ -1743,6 +2373,7 @@ const styles = StyleSheet.create({
   },
   chartWrapper: {
     flex: 1,
+    paddingBottom: 20,
   },
   webView: {
     flex: 1,
@@ -1801,9 +2432,9 @@ const styles = StyleSheet.create({
     color: "#8fe3c7",
   },
   settingsButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "transparent",
@@ -1834,12 +2465,37 @@ const styles = StyleSheet.create({
   chartTypeItemActive: {
     // no-op; variant controls appearance.
   },
-  followButton: {
-    height: 32,
+  floatingFollowButton: {
+    position: "absolute",
+    bottom: 158,
+    right: 44,
+    height: 36,
     borderRadius: 12,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 14,
+    zIndex: 10,
   },
-  followButtonDark: {
-    // Intentionally no background override; UiButton variant controls it.
+  floatingTimer: {
+    position: "absolute",
+    top: 12,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 10,
+  },
+  floatingTimerDark: {},
+  floatingTimerText: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#1a9f7a",
+    backgroundColor: "rgba(255, 255, 255, 0.85)",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  floatingTimerTextDark: {
+    backgroundColor: "rgba(13, 15, 18, 0.85)",
   },
   topSafeArea: {
     position: "absolute",
@@ -1863,6 +2519,76 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     elevation: 6,
     overflow: "hidden",
+  },
+
+  startHintContainer: {
+    position: "absolute",
+    top: 10,
+    left: 12,
+    right: 12,
+    backgroundColor: "#1a9f7a",
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    zIndex: 10,
+    overflow: "hidden",
+  },
+  startHintContainerDark: {
+    backgroundColor: "#1a9f7a",
+  },
+  startHintContent: {
+    alignItems: "center",
+    zIndex: 2,
+  },
+  startHintKicker: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(255, 255, 255, 0.8)",
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  startHintKickerDark: {
+    color: "rgba(255, 255, 255, 0.8)",
+  },
+  startHintText: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#ffffff",
+    textAlign: "center",
+  },
+  startHintTextDark: {
+    color: "#ffffff",
+  },
+  startHintCoins: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    opacity: 0.9,
+    zIndex: 1,
+  },
+  startHintCoin1: {
+    position: "absolute",
+    left: -8,
+    top: -20,
+  },
+  startHintCoin2: {
+    position: "absolute",
+    right: -10,
+    top: -15,
+    transform: [{ rotate: "15deg" }],
+  },
+  startHintCoin3: {
+    position: "absolute",
+    right: 50,
+    bottom: -24,
+    transform: [{ rotate: "-10deg" }],
   },
   profitToastDark: {
     backgroundColor: "#151922",
@@ -2001,36 +2727,13 @@ const styles = StyleSheet.create({
     bottom: -52,
     opacity: 0.92,
   },
-  patternBar: {
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eeeeee",
-    backgroundColor: "#ffffff",
-    justifyContent: "center",
-  },
-  patternBarDark: {
-    borderBottomColor: "#1f2329",
-    backgroundColor: "#0d0f12",
-  },
-  patternRow: {
-    paddingHorizontal: 12,
-    alignItems: "center",
-  },
-  patternToggle: {
-    marginRight: 8,
-  },
-  patternToggleDark: {
-    backgroundColor: "transparent",
-  },
-  patternToggleActive: {
-    backgroundColor: "transparent",
-  },
   bottomSafeArea: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
     paddingHorizontal: 16,
+    gap: TRADE_BAR_GAP,
   },
   wagerBar: {
     flexDirection: "row",

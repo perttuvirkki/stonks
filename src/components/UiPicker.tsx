@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import * as Haptics from "expo-haptics";
 import { getContrastingTextColor } from "./uiColors";
 
 export type UiPickerProps = {
@@ -41,7 +42,10 @@ export const UiPicker = memo(({ options, selectedIndex, onSelect, variant = "seg
         return (
           <Pressable
             key={index}
-            onPress={() => onSelect(index)}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onSelect(index);
+            }}
             style={({ pressed }) => [
               {
                 flex: 1,

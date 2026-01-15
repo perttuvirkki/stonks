@@ -28,6 +28,8 @@ export type BottomControlsProps = {
   onBuy: (side: "long" | "short") => void;
   onSell: () => void;
 
+  disabled?: boolean; // Disable all trading (e.g., round ended)
+
   styles: Record<string, any>;
 };
 
@@ -48,6 +50,7 @@ export function BottomControls({
   canOpenShort,
   onBuy,
   onSell,
+  disabled = false,
   styles,
 }: BottomControlsProps) {
   return (
@@ -85,27 +88,13 @@ export function BottomControls({
           hasPositions ? (
             <>
               <UiButton
-                title={primaryIsShort ? "Short" : "Long"}
-                onPress={() => onBuy(primarySide)}
-                disabled={!canBuy}
-                variant={majorVariant}
-                color={primaryIsShort ? "#f5a524" : "#1a9f7a"}
-                controlSize="large"
-                style={[
-                  styles.tradeButton,
-                  primaryIsShort ? styles.shortButton : styles.buyButton,
-                  !canBuy && (primaryIsShort ? styles.shortButtonDisabled : styles.buyButtonDisabled),
-                ]}
-                darkMode={darkMode}
-              />
-              <UiButton
-                title="Sell"
+                title="Close Position"
                 onPress={onSell}
-                disabled={!hasPositions}
+                disabled={disabled || !hasPositions}
                 variant={majorVariant}
                 color="#d94b4b"
                 controlSize="large"
-                style={[styles.tradeButton, styles.sellButton, !hasPositions && styles.sellButtonDisabled]}
+                style={[styles.tradeButton]}
                 darkMode={darkMode}
               />
             </>
@@ -114,21 +103,21 @@ export function BottomControls({
               <UiButton
                 title="Long"
                 onPress={() => onBuy("long")}
-                disabled={!canBuy || !canOpenLong}
+                disabled={disabled || !canBuy || !canOpenLong}
                 variant={majorVariant}
                 color="#1a9f7a"
                 controlSize="large"
-                style={[styles.tradeButton, styles.buyButton, (!canBuy || !canOpenLong) && styles.buyButtonDisabled]}
+                style={[styles.tradeButton, styles.buyButton, (disabled || !canBuy || !canOpenLong) && styles.buyButtonDisabled]}
                 darkMode={darkMode}
               />
               <UiButton
                 title="Short"
                 onPress={() => onBuy("short")}
-                disabled={!canBuy || !canOpenShort}
+                disabled={disabled || !canBuy || !canOpenShort}
                 variant={majorVariant}
                 color="#f5a524"
                 controlSize="large"
-                style={[styles.tradeButton, styles.shortButton, (!canBuy || !canOpenShort) && styles.shortButtonDisabled]}
+                style={[styles.tradeButton, styles.shortButton, (disabled || !canBuy || !canOpenShort) && styles.shortButtonDisabled]}
                 darkMode={darkMode}
               />
             </>
@@ -138,21 +127,21 @@ export function BottomControls({
             <UiButton
               title="Buy"
               onPress={() => onBuy("long")}
-              disabled={!canBuy}
+              disabled={disabled || !canBuy}
               variant={majorVariant}
               color="#1a9f7a"
               controlSize="large"
-              style={[styles.tradeButton, styles.buyButton, !canBuy && styles.buyButtonDisabled]}
+              style={[styles.tradeButton, styles.buyButton, (disabled || !canBuy) && styles.buyButtonDisabled]}
               darkMode={darkMode}
             />
             <UiButton
               title="Sell"
               onPress={onSell}
-              disabled={!hasPositions}
+              disabled={disabled || !hasPositions}
               variant={majorVariant}
               color="#d94b4b"
               controlSize="large"
-              style={[styles.tradeButton, styles.sellButton, !hasPositions && styles.sellButtonDisabled]}
+              style={[styles.tradeButton, styles.sellButton, (disabled || !hasPositions) && styles.sellButtonDisabled]}
               darkMode={darkMode}
             />
           </>
