@@ -2,7 +2,7 @@ import type { Candle, PatternDefinition, PatternLine, PatternResult } from "../t
 import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
-const PATTERN_LENGTH = 48;
+const PATTERN_LENGTH = 72;
 const HIT_MIN = 3;
 const HIT_MAX = 6;
 

@@ -10,6 +10,8 @@ export type BottomControlsProps = {
   useLeverage: boolean;
   toggleUseLeverage: () => void;
 
+  overtime?: boolean;
+
   majorVariant: ButtonVariant;
   minorVariant: ButtonVariant;
 
@@ -37,6 +39,7 @@ export function BottomControls({
   darkMode,
   useLeverage,
   toggleUseLeverage,
+  overtime = false,
   majorVariant,
   minorVariant,
   wagerOptionLabels,
@@ -53,6 +56,9 @@ export function BottomControls({
   disabled = false,
   styles,
 }: BottomControlsProps) {
+  const disableNonClose = disabled || overtime;
+  const showCloseOnly = overtime && hasPositions;
+
   return (
     <SafeAreaView edges={["bottom", "left", "right"]} style={styles.bottomSafeArea}>
       <View style={[styles.wagerBar, darkMode && styles.wagerBarDark]}>
@@ -67,6 +73,7 @@ export function BottomControls({
           <UiButton
             title={useLeverage ? "Leverage" : "Spot"}
             onPress={toggleUseLeverage}
+            disabled={disabled || overtime}
             variant="borderedProminent"
             color={useLeverage ? "#d94b4b" : "#1a9f7a"}
             style={styles.wagerModeButtonControl}
@@ -77,47 +84,59 @@ export function BottomControls({
         <UiPicker
           options={wagerOptionLabels}
           selectedIndex={leverageIndex}
-          onSelect={onSelectLeverageIndex}
+          onSelect={(index) => {
+            if (disabled || overtime) return;
+            onSelectLeverageIndex(index);
+          }}
           style={styles.wagerPicker}
           darkMode={darkMode}
         />
       </View>
 
       <View style={styles.tradeBar}>
-        {useLeverage ? (
+        {showCloseOnly ? (
+          <UiButton
+            title="Close Position"
+            onPress={onSell}
+            disabled={disabled || !hasPositions}
+            variant={majorVariant}
+            color="#d94b4b"
+            controlSize="large"
+            style={[styles.tradeButton]}
+            darkMode={darkMode}
+          />
+        ) : useLeverage ? (
           hasPositions ? (
-            <>
-              <UiButton
-                title="Close Position"
-                onPress={onSell}
-                disabled={disabled || !hasPositions}
-                variant={majorVariant}
-                color="#d94b4b"
-                controlSize="large"
-                style={[styles.tradeButton]}
-                darkMode={darkMode}
-              />
-            </>
+            <UiButton
+              title="Close Position"
+              onPress={onSell}
+              disabled={disabled || !hasPositions}
+              variant={majorVariant}
+              color="#d94b4b"
+              controlSize="large"
+              style={[styles.tradeButton]}
+              darkMode={darkMode}
+            />
           ) : (
             <>
               <UiButton
                 title="Long"
                 onPress={() => onBuy("long")}
-                disabled={disabled || !canBuy || !canOpenLong}
+                disabled={disableNonClose || !canBuy || !canOpenLong}
                 variant={majorVariant}
                 color="#1a9f7a"
                 controlSize="large"
-                style={[styles.tradeButton, styles.buyButton, (disabled || !canBuy || !canOpenLong) && styles.buyButtonDisabled]}
+                style={[styles.tradeButton, styles.buyButton, (disableNonClose || !canBuy || !canOpenLong) && styles.buyButtonDisabled]}
                 darkMode={darkMode}
               />
               <UiButton
                 title="Short"
                 onPress={() => onBuy("short")}
-                disabled={disabled || !canBuy || !canOpenShort}
+                disabled={disableNonClose || !canBuy || !canOpenShort}
                 variant={majorVariant}
                 color="#f5a524"
                 controlSize="large"
-                style={[styles.tradeButton, styles.shortButton, (disabled || !canBuy || !canOpenShort) && styles.shortButtonDisabled]}
+                style={[styles.tradeButton, styles.shortButton, (disableNonClose || !canBuy || !canOpenShort) && styles.shortButtonDisabled]}
                 darkMode={darkMode}
               />
             </>
@@ -127,11 +146,11 @@ export function BottomControls({
             <UiButton
               title="Buy"
               onPress={() => onBuy("long")}
-              disabled={disabled || !canBuy}
+              disabled={disableNonClose || !canBuy}
               variant={majorVariant}
               color="#1a9f7a"
               controlSize="large"
-              style={[styles.tradeButton, styles.buyButton, (disabled || !canBuy) && styles.buyButtonDisabled]}
+              style={[styles.tradeButton, styles.buyButton, (disableNonClose || !canBuy) && styles.buyButtonDisabled]}
               darkMode={darkMode}
             />
             <UiButton

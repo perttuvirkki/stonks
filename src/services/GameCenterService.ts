@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import * as ExpoStoresGamesServices from "expo-stores-games-services";
+import Constants from "expo-constants";
 
 // Types
 export interface GameCenterPlayer {
@@ -9,9 +10,29 @@ export interface GameCenterPlayer {
   alias: string | null;
 }
 
-// Leaderboard IDs - update these to match your App Store Connect configuration
+// Leaderboard IDs
+// - iOS: Game Center leaderboard identifier
+// - Android: Play Games Services leaderboard ID (looks like "CgkI...")
+type LeaderboardExtra = {
+  leaderboardHighScoreIos?: string;
+  leaderboardHighScoreAndroid?: string;
+  leaderboardNetProfitIos?: string;
+  leaderboardNetProfitAndroid?: string;
+};
+
+const extra = (Constants.expoConfig?.extra ?? {}) as LeaderboardExtra;
+
 export const LEADERBOARDS = {
-  HIGH_SCORE: "topscores1",
+  // 60s sprint / one-minute challenge
+  HIGH_SCORE: Platform.select({
+    ios: extra.leaderboardHighScoreIos ?? "topscores1",
+    android: extra.leaderboardHighScoreAndroid ?? "CgkI5OK25LMEEAIQAQ",
+  }) ?? "topscores1",
+  // Net profit/loss leaderboard (configure IDs in app config / env).
+  NET_PROFIT: Platform.select({
+    ios: extra.leaderboardNetProfitIos ?? "",
+    android: extra.leaderboardNetProfitAndroid ?? "",
+  }) ?? "",
   LONGEST_STREAK: "com.ludussuper.stonks.longeststreak",
   BEST_TRADE: "com.ludussuper.stonks.besttrade",
 } as const;
@@ -27,7 +48,7 @@ export const ACHIEVEMENTS = {
  * Check if Game Center is available on this platform
  */
 export function isGameCenterAvailable(): boolean {
-  return Platform.OS === "ios";
+  return Platform.OS === "ios" || Platform.OS === "android";
 }
 
 /**
@@ -129,8 +150,15 @@ export async function submitScore(leaderboardID: string, score: number): Promise
   if (!isGameCenterAvailable()) {
     return false;
   }
+  if (!leaderboardID) {
+    return false;
+  }
   
   try {
+    // Android commonly fails with ConnectionResult=4 (SIGN_IN_REQUIRED) unless signed in first.
+    if (Platform.OS === "android" && !(await isAuthenticated())) {
+      await authenticate();
+    }
     await ExpoStoresGamesServices.submitScore(Math.floor(score), leaderboardID);
     return true;
   } catch (error) {
@@ -148,8 +176,15 @@ export async function showLeaderboard(leaderboardID: string, timeSpan: number = 
   if (!isGameCenterAvailable()) {
     return;
   }
+  if (!leaderboardID) {
+    return;
+  }
   
   try {
+    // Android commonly fails with ConnectionResult=4 (SIGN_IN_REQUIRED) unless signed in first.
+    if (Platform.OS === "android" && !(await isAuthenticated())) {
+      await authenticate();
+    }
     await ExpoStoresGamesServices.showLeaderboard(leaderboardID, timeSpan);
   } catch (error) {
     console.warn("Failed to show leaderboard:", error);

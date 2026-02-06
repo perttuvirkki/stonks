@@ -2,7 +2,11 @@ import type { Candle, PatternDefinition, PatternLine, PatternResult } from "../t
 import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
-const PATTERN_LENGTH = 48;
+const PATTERN_LENGTH = 72;
+const POLE_FRACTION_MIN = 0.22;
+const POLE_FRACTION_MAX = 0.32;
+const POLE_EASE_MIN = 0.55;
+const POLE_EASE_MAX = 0.75;
 
 const buildPivotIndices = (length: number, pivotCount: number): number[] => {
   if (pivotCount <= 1) {
@@ -74,7 +78,11 @@ const generateBearPennant = (
   const counterChance = 0.32;
   let driftNoise = 0;
 
-  const poleLength = Math.max(8, Math.round(length * 0.4));
+  const poleFraction = POLE_FRACTION_MIN + Math.random() * (POLE_FRACTION_MAX - POLE_FRACTION_MIN);
+  const poleEase = POLE_EASE_MIN + Math.random() * (POLE_EASE_MAX - POLE_EASE_MIN);
+  const minPennantLength = 6;
+  const maxPoleLength = Math.max(1, length - minPennantLength);
+  const poleLength = Math.min(maxPoleLength, Math.max(8, Math.round(length * poleFraction)));
   const pennantLength = Math.max(6, length - poleLength);
   const pivotTouches = 3 + Math.floor(Math.random() * 3);
   const pivotCount = pivotTouches * 2;
@@ -129,7 +137,8 @@ const generateBearPennant = (
       target = startPricePoint + (endPricePoint - startPricePoint) * segmentProgress;
       pivotType = pivotLookup.get(pennantIndex);
     } else {
-      const progress = poleLength === 1 ? 1 : index / (poleLength - 1);
+      const rawProgress = poleLength === 1 ? 1 : index / (poleLength - 1);
+      const progress = Math.pow(rawProgress, poleEase);
       target = startPrice + (poleBottom - startPrice) * progress;
       if (index === poleLength - 1) {
         driftNoise = 0;

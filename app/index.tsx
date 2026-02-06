@@ -14,11 +14,13 @@ import { AnimatedSplash } from "../src/components/AnimatedSplash";
 import { MarginCallOverlay, type MarginCallVariant } from "../src/components/MarginCallOverlay";
 import { PatternSettingsModal } from "../src/components/PatternSettingsModal";
 import { ProFeaturesModal } from "../src/components/ProFeaturesModal";
+import { SettingsMenuModal, type SettingsMenuOption } from "../src/components/SettingsMenuModal";
 import { TopScoreModal } from "../src/components/TopScoreModal";
 import { TotalStatsModal } from "../src/components/TotalStatsModal";
 import { ProfitToast } from "../src/components/ProfitToast";
 import { RoundResultsSheet, type RoundResult, type RoundStats } from "../src/components/RoundResultsSheet";
 import { StackBar, type ChartType } from "../src/components/StackBar";
+import { RocketBurst } from "../src/components/RocketBurst";
 import { RevenueCatProvider, useRevenueCat } from "../src/contexts/RevenueCatContext";
 import { useGameStore } from "../src/stores/useGameStore";
 import TwemojiRocket from "../assets/twemoji/1f680.svg";
@@ -84,6 +86,12 @@ const ROUND_DURATION_MS = 60_000;
 const ROUND_END_SLOW_TICK_MS = 300;
 const ROUND_END_SHEET_DELAY_MS = 900;
 
+type ChartSpeedMs = 100 | 125 | 150 | 175 | 200;
+
+// Estimate used for UI messaging (pattern length + typical resolve/spawn overhead).
+const ESTIMATED_CANDLES_PER_PATTERN_CYCLE = 117;
+const SPEED_HINT_DURATION_MS = 1600;
+
 const CHART_HTML = [
   "<!doctype html>",
   "<html>",
@@ -120,10 +128,13 @@ const CHART_SOURCE = { html: CHART_HTML };
 const WEBVIEW_ORIGIN_WHITELIST = ["*"];
 
 const INJECTED_CHART_SCRIPT = `
-  (function () {
-    var overlay = document.getElementById("overlay");
-    var container = document.getElementById("chart");
-    var readyInterval = null;
+	  (function () {
+	    var overlay = document.getElementById("overlay");
+	    var container = document.getElementById("chart");
+	    var readyInterval = null;
+	    var FOLLOW_RIGHT_OFFSET_BARS = 6;
+	    var PRICE_ZOOM_OUT_MULTIPLIER = 1.5;
+	    var DEFAULT_ZOOM_PRESET = 2;
 
     function post(payload) {
       if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
@@ -151,24 +162,27 @@ const INJECTED_CHART_SCRIPT = `
       post({ type: "error", message: "missing-library" });
       return;
     }
-    if (!window.__chartState) {
-      window.__chartState = {
-        chart: null,
-        series: null,
-        priceType: "candles",
-        pending: null,
-        didFit: false,
-        follow: true,
-        didDisableAutoScale: false,
-        lineSeries: {},
-        markers: [],
-        markerApi: null,
-        initialSpan: null,
-        initialBarSpacing: null,
-        initialRightOffset: null,
-        didBindInteractions: false,
-      };
-    }
+	    if (!window.__chartState) {
+	      window.__chartState = {
+	        chart: null,
+	        series: null,
+	        priceType: "candles",
+	        pending: null,
+	        didFit: false,
+	        follow: true,
+	        didDisableAutoScale: false,
+	        lineSeries: {},
+	        markers: [],
+	        markerApi: null,
+	        initialSpan: null,
+	        initialBarSpacing: null,
+	        initialRightOffset: null,
+	        initialPriceSpan: null,
+	        defaultZoomPreset: DEFAULT_ZOOM_PRESET,
+	        didApplyDefaultZoom: false,
+	        didBindInteractions: false,
+	      };
+	    }
     var state = window.__chartState;
     if (!state.lineSeries) {
       state.lineSeries = {};
@@ -188,9 +202,18 @@ const INJECTED_CHART_SCRIPT = `
     if (!("initialRightOffset" in state)) {
       state.initialRightOffset = null;
     }
-    if (!("follow" in state)) {
-      state.follow = true;
-    }
+	    if (!("initialPriceSpan" in state)) {
+	      state.initialPriceSpan = null;
+	    }
+	    if (!("defaultZoomPreset" in state)) {
+	      state.defaultZoomPreset = DEFAULT_ZOOM_PRESET;
+	    }
+	    if (!("didApplyDefaultZoom" in state)) {
+	      state.didApplyDefaultZoom = false;
+	    }
+	    if (!("follow" in state)) {
+	      state.follow = true;
+	    }
     if (!("didBindInteractions" in state)) {
       state.didBindInteractions = false;
     }
@@ -342,12 +365,28 @@ const INJECTED_CHART_SCRIPT = `
       return !!state.series;
     }
 
-    function disableFollow(reason) {
-      if (state.follow) {
-        state.follow = false;
-        post({ type: "debug", message: "follow:off:" + (reason || "user") });
-      }
-    }
+	    function disableFollow(reason) {
+	      state.lastManualInteractionAt = Date.now();
+	      if (state.autoFollowTimer) {
+	        clearTimeout(state.autoFollowTimer);
+	        state.autoFollowTimer = null;
+	      }
+	      // Auto-follow after the user stops interacting for a moment, but only if they're still near the right edge.
+	      state.autoFollowTimer = setTimeout(function () {
+	        try {
+	          if (!state || state.follow) return;
+	          var lastAt = Number(state.lastManualInteractionAt || 0);
+	          if (!isFinite(lastAt) || Date.now() - lastAt < 500) return;
+	          maybeEnableFollow("auto");
+	        } catch (e) {
+	          // Ignore.
+	        }
+	      }, 520);
+	      if (state.follow) {
+	        state.follow = false;
+	        post({ type: "debug", message: "follow:off:" + (reason || "user") });
+	      }
+	    }
 
     function getLastBar() {
       var data = state.pending;
@@ -446,21 +485,63 @@ const INJECTED_CHART_SCRIPT = `
       ps.setVisibleRange({ from: center - half, to: center + half });
     }
 
-    function getBarStepSeconds(data) {
-      if (!Array.isArray(data) || data.length < 2) {
-        return 60;
-      }
+	    function getBarStepSeconds(data) {
+	      if (!Array.isArray(data) || data.length < 2) {
+	        return 60;
+	      }
       var last = data[data.length - 1];
       var prev = data[data.length - 2];
       var step = prev && isFinite(Number(prev.time)) && isFinite(Number(last.time)) ? Math.abs(Number(last.time) - Number(prev.time)) : 60;
-      return step > 0 ? step : 60;
-    }
+	      return step > 0 ? step : 60;
+	    }
 
-    function followToLastBar() {
-      if (!state.chart || !state.chart.timeScale) {
-        return;
+	    function maybeEnableFollow(source) {
+	      if (!ensureChart()) {
+	        return;
+	      }
+	      if (state.follow) {
+	        return;
+	      }
+	      var timeScale = state.chart && state.chart.timeScale && state.chart.timeScale();
+	      if (!timeScale || typeof timeScale.getVisibleRange !== "function") {
+	        return;
+	      }
+	      var last = getLastBar();
+	      if (!last || !isFinite(Number(last.time))) {
+	        return;
+	      }
+	      var range = timeScale.getVisibleRange();
+	      if (!range || !isFinite(Number(range.from)) || !isFinite(Number(range.to))) {
+	        return;
+	      }
+	      var from = Math.min(Number(range.from), Number(range.to));
+	      var to = Math.max(Number(range.from), Number(range.to));
+	      var lastTime = Number(last.time);
+	      var step = getBarStepSeconds(state.pending);
+	      // Consider "near right edge" if the latest bar is still visible and close to the right side.
+	      var visible = lastTime >= from && lastTime <= to + step * 2;
+	      var nearRight = lastTime >= to - step * (FOLLOW_RIGHT_OFFSET_BARS + 8);
+	      if (!visible || !nearRight) {
+	        return;
+	      }
+	      state.follow = true;
+	      if (state.autoFollowTimer) {
+	        clearTimeout(state.autoFollowTimer);
+	        state.autoFollowTimer = null;
+	      }
+	      followToLastBar();
+	      post({ type: "debug", message: "follow:on:" + (source || "auto") });
+	    }
+
+	    function followToLastBar() {
+	      if (!state.chart || !state.chart.timeScale) {
+	        return;
+	      }
+	      var timeScale = state.chart.timeScale();
+      if (timeScale && typeof timeScale.applyOptions === "function") {
+        // Keep a small space to the right of the latest bar while following.
+        timeScale.applyOptions({ rightOffset: FOLLOW_RIGHT_OFFSET_BARS });
       }
-      var timeScale = state.chart.timeScale();
       var data = state.pending;
       var last = getLastBar();
       if (!last || !isFinite(Number(last.time))) {
@@ -553,6 +634,10 @@ const INJECTED_CHART_SCRIPT = `
             timeScale: { 
               timeVisible: true, 
               secondsVisible: false,
+              // Keep a reasonable minimum to avoid an overly-dense x-axis when using zoom presets.
+              minBarSpacing: 0.5,
+              // Keep a small right padding (in bars) so the latest candle isn't flush to the edge.
+              rightOffset: FOLLOW_RIGHT_OFFSET_BARS,
               barSpacing: 3 // Smaller = more zoomed out (default is ~6-8)
             },
             grid: {
@@ -572,32 +657,32 @@ const INJECTED_CHART_SCRIPT = `
           resizeChart();
           post({ type: "debug", message: "chart-created" });
 
-          if (!state.didBindInteractions && container) {
-            try {
-              // Do NOT disable follow on zoom gestures.
-              // - wheel is typically used for zoom
-              // - pinch zoom uses multi-touch
-              container.addEventListener("mousemove", function (e) {
-                if (e && e.buttons) {
-                  disableFollow("drag");
-                }
-              });
-              container.addEventListener(
-                "touchmove",
-                function (e) {
-                  // If this is a pinch (multi-touch), keep follow enabled.
-                  if (e && e.touches && e.touches.length >= 2) {
-                    return;
-                  }
-                  disableFollow("touch-pan");
-                },
-                { passive: true },
-              );
-              state.didBindInteractions = true;
-            } catch (e) {
-              // Ignore event binding errors.
-            }
-          }
+	          if (!state.didBindInteractions && container) {
+	            try {
+	              // Do NOT disable follow on zoom gestures.
+	              // - wheel is typically used for zoom
+	              // - pinch zoom uses multi-touch
+	              container.addEventListener("mousemove", function (e) {
+	                if (e && e.buttons) {
+	                  disableFollow("drag");
+	                }
+	              });
+	              container.addEventListener(
+	                "touchmove",
+	                function (e) {
+	                  // If this is a pinch (multi-touch), keep follow enabled and let the chart handle zoom.
+	                  if (e && e.touches && e.touches.length >= 2) {
+	                    return;
+	                  }
+	                  disableFollow("touch-pan");
+	                },
+	                { passive: true },
+	              );
+	              state.didBindInteractions = true;
+	            } catch (e) {
+	              // Ignore event binding errors.
+	            }
+	          }
         }
         return !!(state.chart && state.series);
       } catch (err) {
@@ -701,9 +786,26 @@ const INJECTED_CHART_SCRIPT = `
             }
           }
         }
-        if (state.follow) {
-          followToLastBar();
-        }
+	        if (state.initialPriceSpan === null) {
+	          var initialPriceRange = getCurrentVisiblePriceRange();
+	          if (initialPriceRange && isFinite(initialPriceRange.from) && isFinite(initialPriceRange.to)) {
+	            var initialPriceSpan = Number(initialPriceRange.to) - Number(initialPriceRange.from);
+	            if (isFinite(initialPriceSpan) && initialPriceSpan > 0) {
+	              state.initialPriceSpan = initialPriceSpan;
+	            }
+	          }
+	        }
+	        if (!state.didApplyDefaultZoom && state.defaultZoomPreset && window.__setZoomOutPreset) {
+	          try {
+	            window.__setZoomOutPreset(state.defaultZoomPreset);
+	          } catch (e) {
+	            // Ignore.
+	          }
+	          state.didApplyDefaultZoom = true;
+	        }
+	        if (state.follow) {
+	          followToLastBar();
+	        }
       } else if (state.follow) {
         followToLastBar();
       }
@@ -922,10 +1024,10 @@ const INJECTED_CHART_SCRIPT = `
       var timeScale = state.chart.timeScale();
       if (timeScale && typeof timeScale.applyOptions === "function") {
         var resetOptions = {};
-        if (isFinite(state.initialBarSpacing)) {
+        if (typeof state.initialBarSpacing === "number" && isFinite(state.initialBarSpacing)) {
           resetOptions.barSpacing = state.initialBarSpacing;
         }
-        if (isFinite(state.initialRightOffset)) {
+        if (typeof state.initialRightOffset === "number" && isFinite(state.initialRightOffset)) {
           resetOptions.rightOffset = state.initialRightOffset;
         }
         if (Object.keys(resetOptions).length) {
@@ -957,14 +1059,96 @@ const INJECTED_CHART_SCRIPT = `
       }
     };
 
-    window.__enableFollow = function () {
+    window.__setZoomOutPreset = function (preset) {
       if (!ensureChart()) {
         return;
       }
-      state.follow = true;
-      followToLastBar();
-      post({ type: "debug", message: "follow:on" });
+      if (!state.chart || !state.chart.timeScale) {
+        return;
+      }
+      var timeScale = state.chart.timeScale();
+      if (!timeScale || typeof timeScale.applyOptions !== "function") {
+        return;
+      }
+      var level = Number(preset);
+      var zoomFactor = null;
+      if (level === 1) zoomFactor = 1;
+      if (level === 2) zoomFactor = 2;
+      if (level === 3) zoomFactor = 3;
+      if (!isFinite(zoomFactor) || zoomFactor <= 0) {
+        return;
+      }
+      // X axis: use initial bar spacing as baseline if available.
+      var baseBarSpacing = null;
+      if (typeof state.initialBarSpacing === "number" && isFinite(state.initialBarSpacing)) {
+        baseBarSpacing = state.initialBarSpacing;
+      } else if (typeof timeScale.options === "function") {
+        var opts = timeScale.options();
+        if (opts && typeof opts.barSpacing === "number" && isFinite(opts.barSpacing)) {
+          baseBarSpacing = opts.barSpacing;
+        }
+      }
+      if (typeof baseBarSpacing === "number" && isFinite(baseBarSpacing) && baseBarSpacing > 0) {
+        // Only adjust bar spacing; do not also widen the visible time range, as that compounds the zoom-out
+        // effect and makes the time scale overly dense.
+        var nextBarSpacing = baseBarSpacing / zoomFactor;
+        nextBarSpacing = Math.max(0.5, nextBarSpacing);
+        timeScale.applyOptions({ barSpacing: nextBarSpacing });
+      }
+
+      try {
+        // Y axis: widen the visible price range around the latest close.
+        var ps = getPriceScaleApi();
+        if (ps && typeof ps.setVisibleRange === "function") {
+          var priceRange = getCurrentVisiblePriceRange();
+          var lastBar = getLastBar();
+          if (!lastBar && Array.isArray(state.pending) && state.pending.length) {
+            lastBar = state.pending[state.pending.length - 1];
+          }
+          var center = lastBar && isFinite(Number(lastBar.close)) ? Number(lastBar.close) : null;
+          if (!center && priceRange) {
+            center = (priceRange.from + priceRange.to) / 2;
+          }
+          if (priceRange && isFinite(center)) {
+            var priceSpanBase = null;
+            if (typeof state.initialPriceSpan === "number" && isFinite(state.initialPriceSpan)) {
+              priceSpanBase = state.initialPriceSpan;
+            } else {
+              priceSpanBase = Number(priceRange.to) - Number(priceRange.from);
+            }
+            if (typeof priceSpanBase === "number" && isFinite(priceSpanBase) && priceSpanBase > 0) {
+              var nextSpan = priceSpanBase * zoomFactor * PRICE_ZOOM_OUT_MULTIPLIER;
+              var half = nextSpan / 2;
+              try {
+                if (typeof ps.setAutoScale === "function") {
+                  ps.setAutoScale(false);
+                }
+              } catch (e) {
+                // Ignore.
+              }
+              ps.setVisibleRange({ from: center - half, to: center + half });
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore.
+      }
+
+      post({ type: "debug", message: "zoomOutPreset:" + level + ":factor:" + zoomFactor });
     };
+
+	    window.__enableFollow = function () {
+	      if (!ensureChart()) {
+	        return;
+	      }
+	      state.follow = true;
+	      if (state.autoFollowTimer) {
+	        clearTimeout(state.autoFollowTimer);
+	        state.autoFollowTimer = null;
+	      }
+	      followToLastBar();
+	      post({ type: "debug", message: "follow:on" });
+	    };
     window.__setChartTheme = function (theme) {
       if (!theme) {
         return;
@@ -1108,22 +1292,33 @@ function AppContent() {
   const recordRoundEnd = useGameStore((state) => state.recordRoundEnd);
   const recordTrade = useGameStore((state) => state.recordTrade);
   const recordLeverageUse = useGameStore((state) => state.recordLeverageUse);
+  const lifetimeRounds = useGameStore((state) => state.lifetimeStats.totalRounds);
+  const lifetimeTotalProfit = useGameStore((state) => state.lifetimeStats.totalProfit);
+  const lifetimeTotalLoss = useGameStore((state) => state.lifetimeStats.totalLoss);
+  const reviewPromptShown = useGameStore((state) => state.reviewPromptShown);
+  const setReviewPromptShown = useGameStore((state) => state.setReviewPromptShown);
   const webViewRef = useRef<WebView>(null);
   const candleIndexRef = useRef(0);
   const baseTimeRef = useRef<number | null>(null);
   const [isWebReady, setIsWebReady] = useState(false);
-  const [showAnimatedSplash, setShowAnimatedSplash] = useState(false);
-
+  // Show our custom splash immediately so Android doesn't briefly flash the game UI before the animation.
+  const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
   const [isChartFollowing, setIsChartFollowing] = useState(true);
+
   const [isMarginCallVisible, setIsMarginCallVisible] = useState(false);
   const isMarginCallVisibleRef = useRef(false);
   const [isTopScoreVisible, setIsTopScoreVisible] = useState(false);
   const [isTotalStatsVisible, setIsTotalStatsVisible] = useState(false);
+  const [isSettingsMenuVisible, setIsSettingsMenuVisible] = useState(false);
   const [marginCallVariant, setMarginCallVariant] = useState<MarginCallVariant>("classic");
+  const [baseTickMs, setBaseTickMs] = useState<ChartSpeedMs>(TICK_MS as ChartSpeedMs);
+  const baseTickMsRef = useRef<number>(TICK_MS);
   const [tickMs, setTickMs] = useState(TICK_MS);
   const marginCallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isRoundResultsVisible, setIsRoundResultsVisible] = useState(false);
   const [isRoundEnded, setIsRoundEnded] = useState(false);
+  const [isOvertime, setIsOvertime] = useState(false);
+  const isOvertimeRef = useRef(false);
   const isRoundResultsVisibleRef = useRef(false);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
   const [roundSecondsRemaining, setRoundSecondsRemaining] = useState<number | null>(null);
@@ -1131,7 +1326,15 @@ function AppContent() {
   const [currentPatternLabel, setCurrentPatternLabel] = useState<string | null>(null);
   const roundEndsAtRef = useRef<number | null>(null);
   const roundStartNetWorthRef = useRef(0);
-  const roundStatsRef = useRef<RoundStats>({ tradesMade: 0, tradesWon: 0, tradesLost: 0, biggestWinPercent: 0, biggestLossPercent: 0, longestTrade: 0, closestToLiquidation: 100 });
+  const roundStatsRef = useRef<RoundStats>({
+    tradesMade: 0,
+    tradesWon: 0,
+    tradesLost: 0,
+    biggestWinPercent: 0,
+    biggestLossPercent: 0,
+    longestTrade: 0,
+    closestToLiquidation: 100,
+  });
   const roundTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roundCountdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const roundRevealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1144,17 +1347,31 @@ function AppContent() {
   const [enabledPatternIds, setEnabledPatternIds] = useState<string[]>(() => allPatterns.map((pattern) => pattern.id));
   const enabledPatternIdsRef = useRef<string[]>(allPatterns.map((pattern) => pattern.id));
   const [chartType, setChartType] = useState<ChartType>("candles");
-  const initialStackBalance = isPro ? 110 : 100;
+  const [zoomPreset, setZoomPreset] = useState<1 | 2 | 3>(2);
+  const initialStackBalance = isPro ? 200 : 100;
   const stackBalanceRef = useRef(initialStackBalance);
   const positionsRef = useRef<Position[]>([]);
-  const [positionCount, setPositionCount] = useState(0);  // Track position count for re-renders
+  const [positionCount, setPositionCount] = useState(0); // Track position count for re-renders
   const [stackBalance, setStackBalance] = useState(initialStackBalance);
+
+  useEffect(() => {
+    baseTickMsRef.current = baseTickMs;
+  }, [baseTickMs]);
+
+  useEffect(() => {
+    isOvertimeRef.current = isOvertime;
+  }, [isOvertime]);
   const [useLeverage, setUseLeverage] = useState(true);
   const darkMode = useGameStore((state) => state.darkMode);
   const setDarkMode = useGameStore((state) => state.setDarkMode);
   const [leverageIndex, setLeverageIndex] = useState(1);
   const [tradeToast, setTradeToast] = useState<TradeToast | null>(null);
   const [showStartHint, setShowStartHint] = useState(false);
+  const [showSpeedHint, setShowSpeedHint] = useState(false);
+  const [speedHintText, setSpeedHintText] = useState<string>("");
+  const speedHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [overtimeBurstTrigger, setOvertimeBurstTrigger] = useState(0);
+  const [overtimeBannerLayout, setOvertimeBannerLayout] = useState({ width: 0, height: 0 });
   const [showPatternLines, setShowPatternLines] = useState(false);
   const showPatternLinesRef = useRef(false);
   const [rocketBurstTrigger, setRocketBurstTrigger] = useState(0);
@@ -1164,13 +1381,51 @@ function AppContent() {
   const toastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTradeLabelRef = useRef<string>("Trade");
   const [isProFeaturesVisible, setIsProFeaturesVisible] = useState(false);
+  const didTryReviewPromptRef = useRef(false);
+
+  const formatPatternsPerMinute = useCallback((ms: number): string => {
+    const ppm = 60_000 / (ms * ESTIMATED_CANDLES_PER_PATTERN_CYCLE);
+    return `~${ppm.toFixed(1)} patterns/min`;
+  }, []);
+
+  const setChartSpeedMs = useCallback(
+    (next: ChartSpeedMs) => {
+      const didChange = baseTickMsRef.current !== next;
+      setBaseTickMs(next);
+      setTickMs((current) => (current === baseTickMsRef.current ? next : current));
+
+      if (didChange && roundSecondsRemaining === null) {
+        if (speedHintTimeoutRef.current) {
+          clearTimeout(speedHintTimeoutRef.current);
+          speedHintTimeoutRef.current = null;
+        }
+        setShowStartHint(false);
+        setSpeedHintText(formatPatternsPerMinute(next));
+        setShowSpeedHint(true);
+        speedHintTimeoutRef.current = setTimeout(() => {
+          setShowSpeedHint(false);
+        }, SPEED_HINT_DURATION_MS);
+      }
+    },
+    [formatPatternsPerMinute, roundSecondsRemaining],
+  );
+
+  useEffect(() => {
+    if (roundSecondsRemaining !== null && showSpeedHint) {
+      setShowSpeedHint(false);
+      if (speedHintTimeoutRef.current) {
+        clearTimeout(speedHintTimeoutRef.current);
+        speedHintTimeoutRef.current = null;
+      }
+    }
+  }, [roundSecondsRemaining, showSpeedHint]);
 
   useEffect(() => {
     // Top up balance if user becomes Pro and hasn't started trading yet (simple check)
     // or just let them enjoy it on next round.
-    // For now, let's just ensure if they buy Pro mid-game, they get the boost if they are at the starting balance of 100.
+    // If they buy Pro before trading, top up the start stack.
     if (isPro && stackBalanceRef.current === 100) {
-      const newBalance = 110;
+      const newBalance = 200;
       setStackBalance(newBalance);
       stackBalanceRef.current = newBalance;
     }
@@ -1234,10 +1489,19 @@ function AppContent() {
     clearRoundTimers();
     roundEndsAtRef.current = null;
     roundStartNetWorthRef.current = 0;
-    roundStatsRef.current = { tradesMade: 0, tradesWon: 0, tradesLost: 0, biggestWinPercent: 0, biggestLossPercent: 0, longestTrade: 0, closestToLiquidation: 100 };
+    roundStatsRef.current = {
+      tradesMade: 0,
+      tradesWon: 0,
+      tradesLost: 0,
+      biggestWinPercent: 0,
+      biggestLossPercent: 0,
+      longestTrade: 0,
+      closestToLiquidation: 100,
+    };
     setRoundSecondsRemaining(null);
     setIsRoundResultsVisible(false);
     setIsRoundEnded(false);
+    setIsOvertime(false);
   };
 
   const closeAllPositionsAtPrice = (price: number, options: { showToast: boolean }) => {
@@ -1250,9 +1514,7 @@ function AppContent() {
     const proceeds = computeOpenProceeds(price);
     const profit = proceeds - costBasis;
     // In training wheels mode, don't update the actual balance
-    const nextBalance = showPatternLinesRef.current 
-      ? stackBalanceRef.current 
-      : normalizeBalance(stackBalanceRef.current + proceeds);
+    const nextBalance = showPatternLinesRef.current ? stackBalanceRef.current : normalizeBalance(stackBalanceRef.current + proceeds);
     stackBalanceRef.current = nextBalance;
     positionsRef.current = [];
     setPositionCount(0);
@@ -1286,7 +1548,7 @@ function AppContent() {
     }
   };
 
-  const endSprintRound = () => {
+  const finalizeSprintRound = () => {
     const endsAt = roundEndsAtRef.current;
     if (!endsAt) {
       return;
@@ -1301,12 +1563,15 @@ function AppContent() {
 
     // Immediately disable trading
     setIsRoundEnded(true);
+    setIsOvertime(false);
 
     const price = getCurrentPrice() ?? BASE_PRICE;
     const startNetWorth = roundStartNetWorthRef.current || normalizeBalance(computeNetWorth(price));
     const endNetWorth = normalizeBalance(computeNetWorth(price));
     const profit = endNetWorth - startNetWorth;
     const percent = startNetWorth > 0 ? (profit / startNetWorth) * 100 : 0;
+    const startAt = endsAt - ROUND_DURATION_MS;
+    const durationMs = Math.max(ROUND_DURATION_MS, Date.now() - startAt);
 
     // Close positions BEFORE clearing roundEndsAtRef so stats are tracked
     if (positionsRef.current.length) {
@@ -1316,11 +1581,14 @@ function AppContent() {
     // Now clear the ref after positions are closed
     roundEndsAtRef.current = null;
 
-    setRoundResult({ startNetWorth, endNetWorth, profit, percent, durationMs: ROUND_DURATION_MS, stats: { ...roundStatsRef.current } });
+    setRoundResult({ startNetWorth, endNetWorth, profit, percent, durationMs, stats: { ...roundStatsRef.current } });
     setTickMs(ROUND_END_SLOW_TICK_MS);
 
     // Submit score to Game Center
     GameCenter.submitScore(GameCenter.LEADERBOARDS.HIGH_SCORE, endNetWorth);
+    // Submit all-time net profit (current lifetime stats + this round's profit)
+    const allTimeNetProfit = lifetimeTotalProfit - lifetimeTotalLoss + profit;
+    GameCenter.submitScore(GameCenter.LEADERBOARDS.NET_PROFIT, Math.round(allTimeNetProfit));
 
     // Save score to local leaderboard
     addScore(endNetWorth);
@@ -1335,7 +1603,7 @@ function AppContent() {
         biggestLossPercent: roundStatsRef.current.biggestLossPercent,
         wasLiquidated: false,
         closestToLiquidation: roundStatsRef.current.closestToLiquidation,
-        durationMs: ROUND_DURATION_MS,
+        durationMs,
       });
     }
 
@@ -1345,6 +1613,29 @@ function AppContent() {
       }
       roundRevealTimeoutRef.current = null;
     }, ROUND_END_SHEET_DELAY_MS);
+  };
+
+  const endSprintRound = () => {
+    const endsAt = roundEndsAtRef.current;
+    if (!endsAt) {
+      return;
+    }
+    if (isOvertimeRef.current) {
+      return;
+    }
+    // If the timer ends with an open leveraged position, let it run until the position is closed.
+    const hasLeveragedPosition = positionsRef.current.some((position) => (position.leverage ?? 1) > 1);
+    if (hasLeveragedPosition) {
+      clearRoundTimers();
+      setRoundSecondsRemaining(0);
+      setIsRoundEnded(true);
+      setIsOvertime(true);
+      setShowSpeedHint(false);
+      setShowStartHint(false);
+      setOvertimeBurstTrigger(Date.now());
+      return;
+    }
+    finalizeSprintRound();
   };
 
   const startSprintRoundIfNeeded = (price: number) => {
@@ -1369,8 +1660,7 @@ function AppContent() {
     roundCountdownIntervalRef.current = setInterval(() => {
       const msLeft = Math.max(0, (roundEndsAtRef.current ?? endsAt) - Date.now());
       setRoundSecondsRemaining(Math.ceil(msLeft / 1000));
-      
-      
+
       if (showStartHint) setShowStartHint(false);
 
       if (msLeft <= 0) {
@@ -1413,24 +1703,50 @@ function AppContent() {
     isRoundResultsVisibleRef.current = isRoundResultsVisible;
   }, [isRoundResultsVisible]);
 
+  useEffect(() => {
+    // Prompt for a store review on the 2nd completed round, when the end sheet is visible.
+    if (!isRoundResultsVisible) return;
+    if (didTryReviewPromptRef.current) return;
+    if (reviewPromptShown) return;
+    if (lifetimeRounds !== 2) return;
+
+    didTryReviewPromptRef.current = true;
+    // Wait 2 seconds before showing the review prompt so users can see their results first
+    const reviewTimeout = setTimeout(() => {
+      void (async () => {
+        try {
+          if (await StoreReview.hasAction()) {
+            StoreReview.requestReview();
+            setReviewPromptShown(true);
+          }
+        } catch {
+          // Ignore.
+        }
+      })();
+    }, 1500);
+    return () => clearTimeout(reviewTimeout);
+  }, [isRoundResultsVisible, lifetimeRounds, reviewPromptShown, setReviewPromptShown]);
+
   const [gameCenterPlayer, setGameCenterPlayer] = useState<GameCenter.GameCenterPlayer | null>(null);
 
   // Authenticate with Game Center on app launch
   useEffect(() => {
     console.log("Attempting Game Center authentication...");
-    GameCenter.authenticate().then((player) => {
-      console.log("Game Center auth result:", JSON.stringify(player, null, 2));
-      if (player.isAuthenticated) {
-        console.log("Game Center authenticated successfully:", player.displayName);
-        setGameCenterPlayer(player);
-        // Hide the toast after 4 seconds
-        setTimeout(() => setGameCenterPlayer(null), 4000);
-      } else {
-        console.log("Game Center authentication failed or user cancelled.");
-      }
-    }).catch(error => {
-      console.error("Game Center authentication error in App.tsx:", error);
-    });
+    GameCenter.authenticate()
+      .then((player) => {
+        console.log("Game Center auth result:", JSON.stringify(player, null, 2));
+        if (player.isAuthenticated) {
+          console.log("Game Center authenticated successfully:", player.displayName);
+          setGameCenterPlayer(player);
+          // Hide the toast after 4 seconds
+          setTimeout(() => setGameCenterPlayer(null), 4000);
+        } else {
+          console.log("Game Center authentication failed or user cancelled.");
+        }
+      })
+      .catch((error) => {
+        console.error("Game Center authentication error in App.tsx:", error);
+      });
   }, []);
 
   const chartTheme = useMemo(
@@ -1441,7 +1757,7 @@ function AppContent() {
       borderColor: darkMode ? "#2b2f35" : "#dddddd",
       overlayColor: darkMode ? "#8b9098" : "#888888",
     }),
-    [darkMode]
+    [darkMode],
   );
   const getLiquidationPrice = () => {
     const positions = positionsRef.current;
@@ -1471,13 +1787,31 @@ function AppContent() {
 
   useEffect(() => {
     // Show start hint if we are idle and no other overlays are active
-    if (roundSecondsRemaining === null && !isMarginCallVisible && !isRoundResultsVisible && !isPatternSettingsVisible && !isTopScoreVisible && !isProFeaturesVisible) {
+    if (
+      roundSecondsRemaining === null &&
+      !isMarginCallVisible &&
+      !isRoundResultsVisible &&
+      !isPatternSettingsVisible &&
+      !isTopScoreVisible &&
+      !isProFeaturesVisible &&
+      !isSettingsMenuVisible &&
+      !showSpeedHint
+    ) {
       const t = setTimeout(() => setShowStartHint(true), 2000);
       return () => clearTimeout(t);
     } else {
       setShowStartHint(false);
     }
-  }, [roundSecondsRemaining, isMarginCallVisible, isRoundResultsVisible, isPatternSettingsVisible, isTopScoreVisible, isProFeaturesVisible]);
+  }, [
+    roundSecondsRemaining,
+    isMarginCallVisible,
+    isRoundResultsVisible,
+    isPatternSettingsVisible,
+    isTopScoreVisible,
+    isProFeaturesVisible,
+    isSettingsMenuVisible,
+    showSpeedHint,
+  ]);
 
   const showTradeToast = (toast: TradeToast) => {
     setTradeToast(toast);
@@ -1524,48 +1858,94 @@ function AppContent() {
     }
   };
 
-  const openSettings = () => {
+  const settingsMenuOptions: SettingsMenuOption[] = useMemo(() => {
     const darkModeOption = darkMode ? "Disable Dark Mode 🌙" : "Enable Dark Mode 🌙";
     const buyProOption = proPrice ? `Buy PRO ✨ (${proPrice})` : "Buy PRO ✨";
     const topScoresOption = "My top Scores 🏆";
+    const globalLeaderboardOption = "Global leaderboard (Best Round) 🏆";
+    const globalProfitLeaderboardOption = "Global leaderboard (All-time Profit) 💰";
     const rateAppOption = "Rate this app ⭐️";
     const debugProOption = debugProOverride ? "🔧 Disable Debug Pro" : "🔧 Enable Debug Pro";
-    const options = [topScoresOption, "Total Stats 📊", rateAppOption];
+    const options: SettingsMenuOption[] = [
+      {
+        id: "topScores",
+        label: topScoresOption,
+        onPress: () => setIsTopScoreVisible(true),
+      },
+      {
+        id: "globalLeaderboard",
+        label: globalLeaderboardOption,
+        onPress: () => GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE),
+      },
+      {
+        id: "globalProfitLeaderboard",
+        label: globalProfitLeaderboardOption,
+        onPress: () => {
+          if (!GameCenter.LEADERBOARDS.NET_PROFIT) {
+            Alert.alert("Not set up yet", "Add LEADERBOARD_NET_PROFIT_ANDROID / LEADERBOARD_NET_PROFIT_IOS to enable this leaderboard.");
+            return;
+          }
+          GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.NET_PROFIT);
+        },
+      },
+      {
+        id: "totalStats",
+        label: "Total Stats 📊",
+        onPress: () => setIsTotalStatsVisible(true),
+      },
+      {
+        id: "rate",
+        label: rateAppOption,
+        onPress: () => {
+          void (async () => {
+            if (await StoreReview.hasAction()) {
+              StoreReview.requestReview();
+            } else {
+              Alert.alert("Error", "Store review is not available on this device.");
+            }
+          })();
+        },
+      },
+    ];
+
     if (isPro) {
-        options.push(darkModeOption);
+      options.push({
+        id: "darkMode",
+        label: darkModeOption,
+        onPress: () => setDarkMode(!darkMode),
+      });
     } else {
-        options.push(buyProOption, "Restore Purchases");
+      options.push(
+        {
+          id: "buyPro",
+          label: buyProOption,
+          onPress: () => setIsProFeaturesVisible(true),
+        },
+        {
+          id: "restore",
+          label: "Restore Purchases",
+          onPress: () => {
+            void restorePurchases();
+          },
+        },
+      );
     }
 
     if (__DEV__) {
-        options.push(debugProOption);
+      options.push({
+        id: "debugPro",
+        label: debugProOption,
+        onPress: () => setDebugProOverride((prev) => !prev),
+      });
     }
-    options.push("Cancel");
-    const cancelIndex = options.length - 1;
 
-    const onSelect = async (index: number) => {
-      if (options[index] === darkModeOption) {
-        setDarkMode(!darkMode);
-      } else if (options[index] === topScoresOption) {
-        setIsTopScoreVisible(true);
-      } else if (options[index] === "Total Stats 📊") {
-        setIsTotalStatsVisible(true);
-      } else if (options[index] === rateAppOption) {
-        if (await StoreReview.hasAction()) {
-          StoreReview.requestReview();
-        } else {
-          Alert.alert("Error", "Store review is not available on this device.");
-        }
-      } else if (options[index] === buyProOption) {
-        setIsProFeaturesVisible(true);
-      } else if (options[index] === "Restore Purchases") {
-        await restorePurchases();
-      } else if (options[index] === debugProOption) {
-        setDebugProOverride((prev) => !prev);
-      }
-    };
+    return options;
+  }, [darkMode, debugProOverride, isPro, proPrice, restorePurchases]);
 
+  const openSettings = () => {
     if (Platform.OS === "ios") {
+      const options = [...settingsMenuOptions.map((o) => o.label), "Cancel"];
+      const cancelIndex = options.length - 1;
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: isPro ? "Pro Member 🏆" : undefined,
@@ -1573,25 +1953,25 @@ function AppContent() {
           cancelButtonIndex: cancelIndex,
           userInterfaceStyle: darkMode ? "dark" : "light",
         },
-        onSelect
+        (index) => {
+          const picked = settingsMenuOptions[index];
+          if (!picked) return;
+          picked.onPress();
+        },
       );
-    } else {
-      const alertButtons = options.slice(0, -1).map((opt, i) => ({
-        text: opt,
-        onPress: () => { void onSelect(i); },
-      }));
-      alertButtons.push({ text: "Cancel", onPress: () => {} });
-      Alert.alert("Settings", "Choose an option", alertButtons);
+      return;
     }
-  };
 
+    // Android: use an in-app menu (RN Alert supports max 3 buttons and can become impossible to dismiss).
+    setIsSettingsMenuVisible(true);
+  };
 
   const pickMarginCallVariant = (): MarginCallVariant => {
     const roll = Math.random();
-    if (roll < 0.20) return "incomingCall";
-    if (roll < 0.40) return "breakingNews";
-    if (roll < 0.60) return "instruction";
-    if (roll < 0.80) return "mirror";
+    if (roll < 0.2) return "incomingCall";
+    if (roll < 0.4) return "breakingNews";
+    if (roll < 0.6) return "instruction";
+    if (roll < 0.8) return "mirror";
     return "classic";
   };
 
@@ -1603,6 +1983,15 @@ function AppContent() {
   const resetChartView = () => {
     // Follow should never reset/fit scales; only re-enable follow mode.
     webViewRef.current?.injectJavaScript(`window.__enableFollow && window.__enableFollow(); true;`);
+    setIsChartFollowing(true);
+  };
+
+  const applyZoomOutPreset = (preset: 1 | 2 | 3) => {
+    setZoomPreset(preset);
+    webViewRef.current?.injectJavaScript(
+      `window.__setZoomOutPreset && window.__setZoomOutPreset(${preset}); window.__enableFollow && window.__enableFollow(); true;`,
+    );
+    setIsChartFollowing(true);
   };
 
   const resetRun = () => {
@@ -1640,7 +2029,7 @@ function AppContent() {
     hasSentFullDataRef.current = false;
     lineUpdateCounterRef.current = 0;
 
-    setTickMs(TICK_MS);
+    setTickMs(baseTickMsRef.current);
 
     initializeCandles();
     resetChartView();
@@ -1654,7 +2043,7 @@ function AppContent() {
   };
 
   const dismissRoundResults = () => {
-    setTickMs(TICK_MS);
+    setTickMs(baseTickMsRef.current);
     resetRoundState();
     stackBalanceRef.current = initialStackBalance;
     setStackBalance(initialStackBalance);
@@ -1664,6 +2053,9 @@ function AppContent() {
 
   const handleBuy = (sideOverride?: "long" | "short") => {
     if (isMarginCallVisible || isRoundResultsVisible) {
+      return;
+    }
+    if (isRoundEnded) {
       return;
     }
     const price = getCurrentPrice();
@@ -1690,12 +2082,13 @@ function AppContent() {
     const positionSize = amount * leverage;
     const units = positionSize / price;
     positionsRef.current = [...positionsRef.current, { entryPrice: price, units, amount, side, leverage, entryTime: Date.now() }];
-    setPositionCount(positionsRef.current.length);  // Always update for re-render
+    setPositionCount(positionsRef.current.length); // Always update for re-render
     // In training wheels mode, don't update the actual balance or stats
     if (!showPatternLinesRef.current) {
       const nextBalance = normalizeBalance(balance - amount);
       stackBalanceRef.current = nextBalance;
-      setStackBalance(nextBalance);
+      // Don't update displayed stackBalance here - keep showing full stack in top bar
+      // The balance will be updated when the trade is closed
       // Track leverage usage (only for leveraged trades, not spot)
       if (leverage > 1) {
         recordLeverageUse(leverage);
@@ -1718,7 +2111,11 @@ function AppContent() {
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const inOvertime = isOvertimeRef.current;
     closeAllPositionsAtPrice(price, { showToast: true });
+    if (inOvertime && positionsRef.current.length === 0) {
+      finalizeSprintRound();
+    }
   };
   const togglePattern = (id: string) => {
     setEnabledPatternIds((prev) => (prev.includes(id) ? prev.filter((patternId) => patternId !== id) : [...prev, id]));
@@ -1779,16 +2176,18 @@ function AppContent() {
     const lastIndex = candles[candles.length - 1]?.index ?? candles.length - 1;
     const firstIndex = candles[0]?.index ?? 0;
     const baseTime = baseTimeRef.current ?? Math.floor(Date.now() / 1000) - lastIndex * 60;
-    
+
     // Only include pattern lines if training wheels is enabled
-    const lines = showPatternLinesRef.current ? patternLinesRef.current.map((line) => ({
-      id: line.id,
-      kind: line.kind,
-      points: [
-        { time: Math.floor(baseTime + line.startIndex * 60), value: line.startPrice },
-        { time: Math.floor(baseTime + line.endIndex * 60), value: line.endPrice },
-      ],
-    })) : [];
+    const lines = showPatternLinesRef.current
+      ? patternLinesRef.current.map((line) => ({
+          id: line.id,
+          kind: line.kind,
+          points: [
+            { time: Math.floor(baseTime + line.startIndex * 60), value: line.startPrice },
+            { time: Math.floor(baseTime + line.endIndex * 60), value: line.endPrice },
+          ],
+        }))
+      : [];
     const liquidation = getLiquidationPrice();
     if (liquidation) {
       // Extend line far beyond visible range to ensure full-width rendering
@@ -1836,8 +2235,8 @@ function AppContent() {
         isWebReadyRef.current = true;
         hasSentFullDataRef.current = false;
         lastFullDataSendAtRef.current = 0;
-
         setIsChartFollowing(true);
+
         sendFullChartData();
         sendPatternLines();
 
@@ -1849,8 +2248,7 @@ function AppContent() {
         const debugMessage = String(message.message ?? "");
         if (debugMessage.startsWith("data:")) {
           hasSentFullDataRef.current = true;
-        }
-        if (debugMessage === "follow:on" || debugMessage.startsWith("follow:on:")) {
+        } else if (debugMessage.startsWith("follow:on")) {
           setIsChartFollowing(true);
         } else if (debugMessage.startsWith("follow:off")) {
           setIsChartFollowing(false);
@@ -1869,16 +2267,18 @@ function AppContent() {
 
   useEffect(() => {
     isWebReadyRef.current = isWebReady;
-    if (isWebReady) {
-      setTimeout(() => {
-        setShowAnimatedSplash(true);
-        // Small delay to let AnimatedSplash mount before revealing
-        requestAnimationFrame(() => {
-          SplashScreen.hideAsync();
-        });
-      }, 1000);
-    }
   }, [isWebReady]);
+
+  useEffect(() => {
+    // `preventAutoHideAsync()` is called in `app/_layout.tsx`. Hide the native splash after
+    // a short delay so users have time to read the text, before the AnimatedSplash overlay takes over.
+    const splashTimeout = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {
+        // Ignore.
+      });
+    }, 1000);
+    return () => clearTimeout(splashTimeout);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1890,6 +2290,10 @@ function AppContent() {
       }
       if (marginCallTimeoutRef.current) {
         clearTimeout(marginCallTimeoutRef.current);
+      }
+      if (speedHintTimeoutRef.current) {
+        clearTimeout(speedHintTimeoutRef.current);
+        speedHintTimeoutRef.current = null;
       }
     };
   }, []);
@@ -1933,7 +2337,16 @@ function AppContent() {
               patternLinesRef.current = [];
             }
             const patternClose = result.candles.length > 0 ? result.candles[result.candles.length - 1].close : lastClose;
-            targetQueueRef.current = createTargetRunout(patternClose, result.targetPrice);
+            const fastResolve =
+              pattern.id === "head-and-shoulders" ||
+              pattern.id === "reverse-head-and-shoulders" ||
+              pattern.id === "double-top" ||
+              pattern.id === "double-bottom";
+            targetQueueRef.current = createTargetRunout(
+              patternClose,
+              result.targetPrice,
+              fastResolve ? { speedMultiplier: 0.6, maxSteps: 10, overshootMultiplier: 0.7, counterChanceMultiplier: 0.7 } : undefined,
+            );
             hasSpawnedPattern.current = true;
             shouldUpdateLines = true;
           }
@@ -1977,14 +2390,15 @@ function AppContent() {
         const liquidation = getLiquidationPrice();
         if (liquidation) {
           // Calculate distance to liquidation as percentage
-          const distanceToLiq = liquidation.side === "long"
-            ? ((bar.close - liquidation.price) / liquidation.price) * 100
-            : ((liquidation.price - bar.close) / liquidation.price) * 100;
+          const distanceToLiq =
+            liquidation.side === "long"
+              ? ((bar.close - liquidation.price) / liquidation.price) * 100
+              : ((liquidation.price - bar.close) / liquidation.price) * 100;
           // Track the closest we got to liquidation (lower = closer)
           if (distanceToLiq < roundStatsRef.current.closestToLiquidation) {
             roundStatsRef.current.closestToLiquidation = Math.max(0, distanceToLiq);
           }
-          
+
           const isLiquidated = liquidation.side === "long" ? bar.close <= liquidation.price : bar.close >= liquidation.price;
           if (isLiquidated) {
             roundStatsRef.current.closestToLiquidation = 0; // Liquidated = 0%
@@ -1993,12 +2407,12 @@ function AppContent() {
             // Count all liquidated positions as trades lost
             const liquidatedPositionCount = positionsRef.current.length;
             roundStatsRef.current.tradesLost += liquidatedPositionCount;
-            
+
             // Capture stats BEFORE resetRoundState resets them
             const capturedStats = { ...roundStatsRef.current };
             const capturedRoundEndsAt = roundEndsAtRef.current;
             const margin = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
-            
+
             resetRoundState();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             positionsRef.current = [];
@@ -2013,7 +2427,7 @@ function AppContent() {
               setMarginCallVariant(pickMarginCallVariant());
               setIsMarginCallVisible(true);
               marginCallTimeoutRef.current = null;
-              
+
               // Record liquidation in lifetime stats (only for real rounds, not training wheels)
               if (!showPatternLinesRef.current) {
                 recordRoundEnd({
@@ -2024,7 +2438,7 @@ function AppContent() {
                   biggestLossPercent: capturedStats.biggestLossPercent,
                   wasLiquidated: true,
                   closestToLiquidation: 0,
-                  durationMs: capturedRoundEndsAt ? (Date.now() - (capturedRoundEndsAt - ROUND_DURATION_MS)) : ROUND_DURATION_MS,
+                  durationMs: capturedRoundEndsAt ? Date.now() - (capturedRoundEndsAt - ROUND_DURATION_MS) : ROUND_DURATION_MS,
                   liquidationLeverage: liquidatedLeverage,
                 });
               }
@@ -2065,8 +2479,8 @@ function AppContent() {
     ? tradeToast.kind === "liquidation"
       ? "-100.00%"
       : tradeToast.kind === "flat"
-      ? "0.00%"
-      : `${tradeToast.kind === "profit" ? "+" : ""}${tradeToast.percent.toFixed(2)}%`
+        ? "0.00%"
+        : `${tradeToast.kind === "profit" ? "+" : ""}${tradeToast.percent.toFixed(2)}%`
     : "";
   const toastBackgroundAccessory =
     tradeToast?.kind === "profit" ? (
@@ -2105,10 +2519,11 @@ function AppContent() {
     tradeToast?.kind === "loss"
       ? styles.profitToastBigValueLoss
       : tradeToast?.kind === "liquidation"
-      ? styles.profitToastBigValueLiquidation
-      : tradeToast?.kind === "flat"
-      ? styles.profitToastBigValueFlat
-      : null;
+        ? styles.profitToastBigValueLiquidation
+        : tradeToast?.kind === "flat"
+          ? styles.profitToastBigValueFlat
+          : null;
+  const showOvertimeHint = isOvertime && positionCount > 0 && !isRoundResultsVisible && !isMarginCallVisible;
 
   return (
     <>
@@ -2128,26 +2543,24 @@ function AppContent() {
         />
         {/* Game Center Welcome Toast */}
         {gameCenterPlayer?.isAuthenticated && (
-           <Animated.View 
-             entering={FadeIn.delay(500).duration(500)} 
-             exiting={FadeOut.duration(500)}
-             style={{ 
-               position: 'absolute', 
-               top: insets.top + 60, 
-               alignSelf: 'center', 
-               backgroundColor: darkMode ? 'rgba(30,30,30,0.9)' : 'rgba(255,255,255,0.9)', 
-               paddingVertical: 8, 
-               paddingHorizontal: 16, 
-               borderRadius: 20, 
-               zIndex: 100,
-               borderWidth: 1,
-               borderColor: darkMode ? '#333' : '#ddd',
-             }}
-           >
-             <Text style={{ color: darkMode ? '#fff' : '#000', fontSize: 13, fontWeight: '600' }}>
-               🎮 Signed in as {gameCenterPlayer.displayName}
-             </Text>
-           </Animated.View>
+          <Animated.View
+            entering={FadeIn.delay(500).duration(500)}
+            exiting={FadeOut.duration(500)}
+            style={{
+              position: "absolute",
+              top: insets.top + 60,
+              alignSelf: "center",
+              backgroundColor: darkMode ? "rgba(30,30,30,0.9)" : "rgba(255,255,255,0.9)",
+              paddingVertical: 8,
+              paddingHorizontal: 16,
+              borderRadius: 20,
+              zIndex: 100,
+              borderWidth: 1,
+              borderColor: darkMode ? "#333" : "#ddd",
+            }}
+          >
+            <Text style={{ color: darkMode ? "#fff" : "#000", fontSize: 13, fontWeight: "600" }}>🎮 Signed in as {gameCenterPlayer.displayName}</Text>
+          </Animated.View>
         )}
         <StackBar
           stackBalance={stackBalance}
@@ -2168,7 +2581,6 @@ function AppContent() {
               setIsProFeaturesVisible(true);
             }
           }}
-          openLeaderboard={() => GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE)}
           minorVariant={minorVariant}
           styles={styles}
         />
@@ -2203,26 +2615,74 @@ function AppContent() {
               webViewRef.current?.reload();
             }}
           />
+          <View style={styles.floatingSpeed}>
+            <View style={styles.floatingSpeedButtons}>
+              {[100, 125, 150, 175, 200].map((ms) => (
+                <UiButton
+                  key={ms}
+                  title={`${ms}ms`}
+                  onPress={() => setChartSpeedMs(ms as ChartSpeedMs)}
+                  variant={baseTickMs === ms ? "borderedProminent" : "bordered"}
+                  color={baseTickMs === ms ? "#1a9f7a" : undefined}
+                  controlSize="small"
+                  style={styles.floatingSpeedButton}
+                  darkMode={darkMode}
+                />
+              ))}
+            </View>
+          </View>
           {typeof roundSecondsRemaining === "number" && (
             <View style={[styles.floatingTimer, darkMode && styles.floatingTimerDark]}>
               <Text style={[styles.floatingTimerText, darkMode && styles.floatingTimerTextDark]}>{Math.max(0, roundSecondsRemaining)}s</Text>
             </View>
           )}
-          {!isChartFollowing && (
-            <UiButton
-              title="⎋ Follow Price"
-              onPress={resetChartView}
-              variant="borderedProminent"
-              color="#1a9f7a"
-              controlSize="small"
-              style={styles.floatingFollowButton}
-              darkMode={darkMode}
-            />
-          )}
+          <View style={styles.floatingFollowContainer}>
+            <View style={styles.floatingZoomButtons}>
+              {!isChartFollowing && (
+                <UiButton
+                  title="Follow"
+                  onPress={resetChartView}
+                  variant="borderedProminent"
+                  color="#1a9f7a"
+                  controlSize="small"
+                  style={styles.floatingFollowButton}
+                  darkMode={darkMode}
+                />
+              )}
+              <UiButton
+                title="1×"
+                onPress={() => applyZoomOutPreset(1)}
+                variant={zoomPreset === 1 ? "borderedProminent" : "bordered"}
+                color={zoomPreset === 1 ? "#1a9f7a" : undefined}
+                controlSize="small"
+                style={styles.floatingZoomButton}
+                darkMode={darkMode}
+              />
+              <UiButton
+                title="2×"
+                onPress={() => applyZoomOutPreset(2)}
+                variant={zoomPreset === 2 ? "borderedProminent" : "bordered"}
+                color={zoomPreset === 2 ? "#1a9f7a" : undefined}
+                controlSize="small"
+                style={styles.floatingZoomButton}
+                darkMode={darkMode}
+              />
+              <UiButton
+                title="3×"
+                onPress={() => applyZoomOutPreset(3)}
+                variant={zoomPreset === 3 ? "borderedProminent" : "bordered"}
+                color={zoomPreset === 3 ? "#1a9f7a" : undefined}
+                controlSize="small"
+                style={styles.floatingZoomButton}
+                darkMode={darkMode}
+              />
+            </View>
+          </View>
           <BottomControls
             darkMode={darkMode}
             useLeverage={useLeverage}
             toggleUseLeverage={toggleUseLeverage}
+            overtime={isOvertime}
             majorVariant={majorVariant}
             minorVariant={minorVariant}
             wagerOptionLabels={wagerOptionLabels}
@@ -2236,19 +2696,23 @@ function AppContent() {
             canOpenShort={canOpenShort}
             onBuy={handleBuy}
             onSell={handleSell}
-            disabled={isRoundEnded || isRoundResultsVisible || isMarginCallVisible || (typeof roundSecondsRemaining === "number" && roundSecondsRemaining <= 0)}
+            disabled={
+              isRoundResultsVisible ||
+              isMarginCallVisible ||
+              (!isOvertime && (isRoundEnded || (typeof roundSecondsRemaining === "number" && roundSecondsRemaining <= 0)))
+            }
             styles={styles}
           />
 
-          {showStartHint && (
+          {(showStartHint || showSpeedHint || showOvertimeHint) && (
             <Animated.View
               entering={FadeIn.duration(300)}
               exiting={FadeOut.duration(200)}
-              pointerEvents={showPatternLines ? "auto" : "none"}
-              style={{ position: 'absolute', top: 10, left: 12, right: 12, alignItems: 'center', zIndex: 10 }}
+              pointerEvents={showSpeedHint || showOvertimeHint ? "none" : showPatternLines ? "auto" : "none"}
+              style={{ position: "absolute", top: 58, left: 12, right: 12, alignItems: "center", zIndex: 10 }}
             >
               <Pressable
-                disabled={!showPatternLines}
+                disabled={showSpeedHint || showOvertimeHint || !showPatternLines}
                 onPress={() => {
                   if (showPatternLines) {
                     setShowPatternLines(false);
@@ -2256,10 +2720,32 @@ function AppContent() {
                     stackBalanceRef.current = initialStackBalance;
                   }
                 }}
-                style={[styles.startHintContainer, darkMode && styles.startHintContainerDark, { position: 'relative', top: 0, left: 0, right: 0, width: '100%' }]}
+                onLayout={(e) => {
+                  if (!showOvertimeHint) return;
+                  const { width, height } = e.nativeEvent.layout;
+                  if (width !== overtimeBannerLayout.width || height !== overtimeBannerLayout.height) {
+                    setOvertimeBannerLayout({ width, height });
+                  }
+                }}
+                style={[
+                  styles.startHintContainer,
+                  darkMode && styles.startHintContainerDark,
+                  showOvertimeHint && styles.overtimeHintContainer,
+                  { position: "relative", top: 0, left: 0, right: 0, width: "100%" },
+                ]}
               >
+                {showOvertimeHint && !!overtimeBurstTrigger && overtimeBannerLayout.width > 0 && overtimeBannerLayout.height > 0 ? (
+                  <View pointerEvents="none" style={styles.overtimeBurstLayer}>
+                    <RocketBurst
+                      trigger={overtimeBurstTrigger}
+                      darkMode={darkMode}
+                      width={overtimeBannerLayout.width}
+                      height={overtimeBannerLayout.height}
+                    />
+                  </View>
+                ) : null}
                 <View pointerEvents="none" style={styles.startHintCoins}>
-                  {showPatternLines ? (
+                  {showSpeedHint || showOvertimeHint ? null : showPatternLines ? (
                     <>
                       <TwemojiWheel width={72} height={72} style={styles.startHintCoin1} />
                       <TwemojiWheel width={64} height={64} style={styles.startHintCoin2} />
@@ -2273,26 +2759,29 @@ function AppContent() {
                     </>
                   )}
                 </View>
-                <View style={[styles.startHintContent, { width: '100%', alignItems: 'center' }]}>
-                  <Text style={[styles.startHintKicker, darkMode && styles.startHintKickerDark, { textAlign: 'center' }]}>
-                    {showPatternLines ? "Training Wheels ON" : "Ready to trade?"}
+                <View style={[styles.startHintContent, { width: "100%", alignItems: "center" }]}>
+                  <Text style={[styles.startHintKicker, darkMode && styles.startHintKickerDark, { textAlign: "center" }]}>
+                    {showOvertimeHint ? "Let it run!" : showSpeedHint ? "Speed updated" : showPatternLines ? "Training Wheels ON" : "Ready to trade?"}
                   </Text>
-                  <Text style={[styles.startHintText, darkMode && styles.startHintTextDark, { textAlign: 'center' }]}>
-                    {showPatternLines ? "Tap to turn off & start playing" : "Hit BUY to start your 60s sprint!"}
+                  <Text style={[styles.startHintText, darkMode && styles.startHintTextDark, { textAlign: "center" }]}>
+                    {showOvertimeHint
+                      ? "Close position to end game"
+                      : showSpeedHint
+                        ? speedHintText
+                        : showPatternLines
+                          ? "Tap to turn off & start playing"
+                          : "Hit BUY to start your 60s sprint!"}
                   </Text>
                 </View>
               </Pressable>
 
-              {showPatternLines && currentPatternLabel && (
+              {!showSpeedHint && !showOvertimeHint && showPatternLines && currentPatternLabel && (
                 <View style={{ marginTop: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12 }}>
-                  <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600", textAlign: "center" }}>
-                    Forming: {currentPatternLabel}
-                  </Text>
+                  <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600", textAlign: "center" }}>Forming: {currentPatternLabel}</Text>
                 </View>
               )}
             </Animated.View>
           )}
-
         </View>
         <RoundResultsSheet
           visible={isRoundResultsVisible}
@@ -2305,12 +2794,7 @@ function AppContent() {
             dismissRoundResults();
           }}
         />
-        <MarginCallOverlay
-          visible={isMarginCallVisible}
-          darkMode={darkMode}
-          variant={marginCallVariant}
-          onTryAgain={resetRun}
-        />
+        <MarginCallOverlay visible={isMarginCallVisible} darkMode={darkMode} variant={marginCallVariant} onTryAgain={resetRun} />
         <PatternSettingsModal
           visible={isPatternSettingsVisible}
           darkMode={darkMode}
@@ -2330,16 +2814,20 @@ function AppContent() {
           }}
           onClose={() => setIsPatternSettingsVisible(false)}
         />
-        <TopScoreModal
-          visible={isTopScoreVisible}
+        <SettingsMenuModal
+          visible={isSettingsMenuVisible}
           darkMode={darkMode}
-          onClose={() => setIsTopScoreVisible(false)}
+          options={settingsMenuOptions.map((opt) => ({
+            ...opt,
+            onPress: () => {
+              setIsSettingsMenuVisible(false);
+              setTimeout(() => opt.onPress(), 0);
+            },
+          }))}
+          onClose={() => setIsSettingsMenuVisible(false)}
         />
-        <TotalStatsModal
-          visible={isTotalStatsVisible}
-          darkMode={darkMode}
-          onClose={() => setIsTotalStatsVisible(false)}
-        />
+        <TopScoreModal visible={isTopScoreVisible} darkMode={darkMode} onClose={() => setIsTopScoreVisible(false)} />
+        <TotalStatsModal visible={isTotalStatsVisible} darkMode={darkMode} onClose={() => setIsTotalStatsVisible(false)} />
         <ProFeaturesModal
           visible={isProFeaturesVisible}
           darkMode={darkMode}
@@ -2353,8 +2841,6 @@ function AppContent() {
     </>
   );
 }
-
-
 
 export default function Index() {
   return <AppContent />;
@@ -2462,25 +2948,62 @@ const styles = StyleSheet.create({
   chartTypeItemActive: {
     // no-op; variant controls appearance.
   },
-  floatingFollowButton: {
+  floatingFollowContainer: {
     position: "absolute",
     bottom: 158,
     right: 44,
-    height: 36,
-    borderRadius: 12,
-    borderBottomRightRadius: 0,
-    paddingHorizontal: 14,
     zIndex: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  floatingZoomButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+    marginRight: 6,
+  },
+  floatingZoomButton: {
+    height: 30,
+    width: 50,
+    paddingHorizontal: 0,
+    borderRadius: 10,
+  },
+  floatingFollowButton: {
+    height: 30,
+    width: 78,
+    paddingHorizontal: 0,
+    borderRadius: 10,
   },
   floatingTimer: {
     position: "absolute",
-    top: 12,
+    top: 54,
     left: 0,
     right: 0,
     alignItems: "center",
     zIndex: 10,
   },
   floatingTimerDark: {},
+  floatingSpeed: {
+    position: "absolute",
+    top: 12,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 11,
+  },
+  floatingSpeedButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  floatingSpeedButton: {
+    height: 30,
+    width: 50,
+    paddingHorizontal: 0,
+    borderRadius: 10,
+  },
   floatingTimerText: {
     fontSize: 18,
     fontWeight: "900",
@@ -2538,9 +3061,16 @@ const styles = StyleSheet.create({
   startHintContainerDark: {
     backgroundColor: "#1a9f7a",
   },
+  overtimeHintContainer: {
+    backgroundColor: "#f5a623",
+  },
   startHintContent: {
     alignItems: "center",
     zIndex: 2,
+  },
+  overtimeBurstLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
   startHintKicker: {
     fontSize: 12,
@@ -2728,8 +3258,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: Platform.OS === "android" ? 10 : 0,
     paddingHorizontal: 16,
+    paddingBottom: Platform.OS === "android" ? 6 : 0,
     gap: TRADE_BAR_GAP,
   },
   wagerBar: {

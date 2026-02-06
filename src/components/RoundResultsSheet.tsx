@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Dimensions, Image, Share, StyleSheet, Text, View, Alert } from "react-native";
+import { Dimensions, Image, Platform, Share, StyleSheet, Text, TextInput, View, Alert, Modal, TouchableOpacity, TouchableWithoutFeedback, Keyboard } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import ViewShot from "react-native-view-shot";
@@ -129,18 +129,21 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
   // Use actual result for visuals
   const testPercent = safeResult.percent;
   const [screenshotTag, setScreenshotTag] = useState<string | null>(null);
+  const [tagModalVisible, setTagModalVisible] = useState(false);
+  const [tagInputValue, setTagInputValue] = useState("");
 
   const handleAddTag = () => {
-    Alert.prompt(
-      "Add Tag", 
-      "Enter a name or tag for your screenshot", 
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "OK", onPress: (tag?: string) => setScreenshotTag(tag ?? null) }
-      ], 
-      "plain-text", 
-      screenshotTag ?? ""
-    );
+    setTagInputValue(screenshotTag ?? "");
+    setTagModalVisible(true);
+  };
+
+  const handleTagSubmit = () => {
+    setScreenshotTag(tagInputValue.trim() || null);
+    setTagModalVisible(false);
+  };
+
+  const handleTagCancel = () => {
+    setTagModalVisible(false);
   };
 
   const isMassiveWin = testPercent >= 5000;
@@ -446,6 +449,47 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
            </View>
         </View>
       </View>
+
+      {/* Tag Input Modal - Cross-platform replacement for Alert.prompt */}
+      <Modal
+        visible={tagModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleTagCancel}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: palette.background }]}>
+              <Text style={[styles.modalTitle, { color: palette.textPrimary }]}>Add Tag</Text>
+              <Text style={[styles.modalSubtitle, { color: palette.textSecondary }]}>
+                Enter a name or tag for your screenshot
+              </Text>
+              <TextInput
+                style={[styles.modalInput, { 
+                  color: palette.textPrimary, 
+                  borderColor: palette.divider,
+                  backgroundColor: darkMode ? "#1a1d22" : "#f5f5f5"
+                }]}
+                value={tagInputValue}
+                onChangeText={setTagInputValue}
+                placeholder="@username"
+                placeholderTextColor={palette.textSecondary}
+                autoFocus
+                onSubmitEditing={handleTagSubmit}
+                returnKeyType="done"
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity onPress={handleTagCancel} style={styles.modalButton}>
+                  <Text style={[styles.modalButtonText, { color: palette.textSecondary }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleTagSubmit} style={styles.modalButton}>
+                  <Text style={[styles.modalButtonText, { color: palette.profit }]}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </Animated.View>
   );
 });
@@ -582,5 +626,55 @@ const styles = StyleSheet.create({
     top: 260,
     left: 210,
     transform: [{ rotate: "22deg" }],
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 14,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 16,
+  },
+  modalButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

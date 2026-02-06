@@ -1,5 +1,5 @@
 import type { PatternDefinition } from "../types";
-import { MAX_PRICE, MIN_PRICE } from "../constants";
+import { BASE_PRICE, MAX_PRICE, MIN_PRICE } from "../constants";
 import { ascendingTrianglePattern } from "./ascendingTriangle";
 import { descendingTrianglePattern } from "./descendingTriangle";
 import { headAndShouldersPattern } from "./headAndShoulders";
@@ -88,9 +88,15 @@ export const choosePattern = (currentPrice: number, enabledIds?: string[]) => {
     return fallback;
   }
 
-  const range = Math.max(1, MAX_PRICE - MIN_PRICE);
-  const normalized = Math.max(0, Math.min(1, (currentPrice - MIN_PRICE) / range));
-  const bearishWeight = 0.1 + 0.8 * normalized;
+  // Bias should "center" around BASE_PRICE (not MIN/MAX midpoint).
+  // At BASE_PRICE => bearishWeight ~= 0.5 (neutral).
+  // Towards MAX_PRICE => bearishWeight trends towards 0.9 (more bearish patterns).
+  // Towards MIN_PRICE => bearishWeight trends towards 0.1 (more bullish patterns).
+  const spanDown = Math.max(1, BASE_PRICE - MIN_PRICE);
+  const spanUp = Math.max(1, MAX_PRICE - BASE_PRICE);
+  const span = Math.max(spanDown, spanUp);
+  const centered = Math.max(-1, Math.min(1, (currentPrice - BASE_PRICE) / span));
+  const bearishWeight = 0.5 + 0.4 * centered;
   const roll = Math.random();
   if (roll < bearishWeight) {
     return pickRandom(bearish);

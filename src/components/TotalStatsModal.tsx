@@ -12,8 +12,8 @@ type TotalStatsModalProps = {
 };
 
 const formatNumber = (n: number) => n.toLocaleString();
-const formatMoney = (n: number) => `$${n.toLocaleString()}`;
-const formatPercent = (n: number) => `${n.toFixed(1)}%`;
+const formatMoney = (n: number) => `$${Math.round(n).toLocaleString()}`;
+const formatPercent = (n: number) => `${Math.round(n)}%`;
 const formatTime = (ms: number) => {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);

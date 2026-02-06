@@ -2,7 +2,7 @@ import type { Candle, PatternDefinition, PatternLine, PatternResult } from "../t
 import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
-const PATTERN_LENGTH = 100;
+const PATTERN_LENGTH = 150;
 
 const generateId = () => `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 

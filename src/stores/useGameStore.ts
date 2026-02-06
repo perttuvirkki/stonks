@@ -66,10 +66,12 @@ type GameState = {
   highScores: HighScore[];
   isPro: boolean;
   darkMode: boolean;
+  reviewPromptShown: boolean;
   lifetimeStats: LifetimeStats;
   addScore: (score: number) => void;
   clearScores: () => void;
   setIsPro: (status: boolean) => void;
+  setReviewPromptShown: (status: boolean) => void;
   recordRoundEnd: (stats: {
     tradesWon: number;
     tradesLost: number;
@@ -93,6 +95,7 @@ export const useGameStore = create<GameState>()(
       highScores: [],
       isPro: false,
       darkMode: false,
+      reviewPromptShown: false,
       lifetimeStats: DEFAULT_LIFETIME_STATS,
       addScore: (score) =>
         set((state) => {
@@ -111,6 +114,7 @@ export const useGameStore = create<GameState>()(
       clearScores: () => set({ highScores: [] }),
       setIsPro: (status) => set({ isPro: status }),
       setDarkMode: (status) => set({ darkMode: status }),
+      setReviewPromptShown: (status) => set({ reviewPromptShown: status }),
       recordRoundEnd: (stats) =>
         set((state) => {
           const ls = state.lifetimeStats;

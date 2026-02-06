@@ -2,7 +2,7 @@ import type { Candle, PatternDefinition, PatternLine, PatternResult } from "../t
 import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
-const PATTERN_LENGTH = 64;
+const PATTERN_LENGTH = 96;
 const HIT_MIN = 4;
 const HIT_MAX = 7;
 
@@ -61,13 +61,13 @@ const generateDiamondTop = (
   const diamondLength = Math.max(10, length - leadLength);
   const mid = Math.max(1, Math.floor(diamondLength / 2));
 
-  const peak = clamp(startPrice * 1.06, MIN_PRICE + minPad, MAX_PRICE - minPad);
+  const peak = clamp(startPrice * 1.05, MIN_PRICE + minPad, MAX_PRICE - minPad);
   const leadHeight = Math.max(pct(0.02), peak - startPrice);
 
-  const centerStart = clamp(peak * 0.992, MIN_PRICE + minPad, MAX_PRICE - minPad);
-  const baseHalfHeight = Math.max(pct(0.012), leadHeight * 0.36);
-  const expandHalfHeight = baseHalfHeight * (1.65 + Math.random() * 0.35);
-  const contractHalfHeight = baseHalfHeight * (0.85 + Math.random() * 0.25);
+  const centerStart = clamp(peak * 0.995, MIN_PRICE + minPad, MAX_PRICE - minPad);
+  const baseHalfHeight = Math.max(pct(0.011), leadHeight * 0.31);
+  const expandHalfHeight = baseHalfHeight * (1.5 + Math.random() * 0.3);
+  const contractHalfHeight = baseHalfHeight * (0.8 + Math.random() * 0.22);
 
   const centerMid = clamp(centerStart - leadHeight * (0.08 + Math.random() * 0.08), MIN_PRICE + minPad, MAX_PRICE - minPad);
   const centerEnd = clamp(centerStart - leadHeight * (0.25 + Math.random() * 0.12), MIN_PRICE + minPad, MAX_PRICE - minPad);
@@ -79,7 +79,7 @@ const generateDiamondTop = (
   const upperEnd = clamp(centerEnd + contractHalfHeight, MIN_PRICE + minPad, MAX_PRICE - minPad);
   const lowerEnd = clamp(centerEnd - contractHalfHeight, MIN_PRICE + minPad, MAX_PRICE - minPad);
 
-  const height = Math.max(pct(0.015), upperMid - lowerMid);
+  const height = Math.max(pct(0.013), upperMid - lowerMid);
 
   // Add wobble so the diamond doesn't look like a perfect polygon.
   const upperWobble: number[] = [];

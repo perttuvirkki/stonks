@@ -88,7 +88,7 @@ export const ProFeaturesModal = memo(({ visible, darkMode, price, onBuy, onClose
         <View style={styles.features}>
             <FeatureRow 
                 icon={<TwemojiBanknote width={28} height={28} />} 
-                title="Start with +$10 bonus" 
+                title="Start with +$100 bonus" 
                 subtitle="It's not gonna make a difference" 
                 darkMode={darkMode} 
                 bg={featureBg} 

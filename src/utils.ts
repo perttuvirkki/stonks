@@ -59,7 +59,15 @@ export const createCandle = (previousClose: number): Candle => {
   };
 };
 
-export const createTargetRunout = (startPrice: number, targetPrice: number): Candle[] => {
+export type TargetRunoutOptions = {
+  speedMultiplier?: number; // <1 = faster (fewer candles), >1 = slower
+  minSteps?: number;
+  maxSteps?: number;
+  overshootMultiplier?: number;
+  counterChanceMultiplier?: number;
+};
+
+export const createTargetRunout = (startPrice: number, targetPrice: number, options: TargetRunoutOptions = {}): Candle[] => {
   const distance = targetPrice - startPrice;
   if (distance === 0) {
     return [];
@@ -75,16 +83,27 @@ export const createTargetRunout = (startPrice: number, targetPrice: number): Can
   // Drama affects step count, speed, and overshoot
   const baseSteps = Math.max(6, Math.min(18, Math.round(absDistance / 2)));
   const stepMultiplier = dramaLevel === 3 ? 0.4 : dramaLevel === 2 ? 0.6 : dramaLevel === 0 ? 1.3 : 1;
-  const totalSteps = Math.max(3, Math.round(baseSteps * stepMultiplier));
+  const speedMultiplier = typeof options.speedMultiplier === "number" && isFinite(options.speedMultiplier) && options.speedMultiplier > 0 ? options.speedMultiplier : 1;
+  const minSteps = typeof options.minSteps === "number" && isFinite(options.minSteps) ? Math.max(1, Math.floor(options.minSteps)) : 3;
+  const maxSteps = typeof options.maxSteps === "number" && isFinite(options.maxSteps) ? Math.max(minSteps, Math.floor(options.maxSteps)) : Infinity;
+  const totalSteps = Math.min(maxSteps, Math.max(minSteps, Math.round(baseSteps * stepMultiplier * speedMultiplier)));
   const runSteps = Math.max(1, totalSteps - 1);
 
   // Overshoot for dramatic moves
+  const overshootMultiplier =
+    typeof options.overshootMultiplier === "number" && isFinite(options.overshootMultiplier) && options.overshootMultiplier >= 0
+      ? options.overshootMultiplier
+      : 1;
   const overshootAmount =
-    dramaLevel === 3 ? absDistance * (0.3 + Math.random() * 0.4) : dramaLevel === 2 ? absDistance * (0.1 + Math.random() * 0.2) : 0;
-  const overshootTarget = targetPrice + direction * overshootAmount;
+    dramaLevel === 3 ? absDistance * (0.15 + Math.random() * 0.2) : dramaLevel === 2 ? absDistance * (0.06 + Math.random() * 0.12) : 0;
+  const overshootTarget = targetPrice + direction * (overshootAmount * overshootMultiplier);
 
   // Counter-trend chance varies by drama
-  const counterChance = dramaLevel === 3 ? 0.1 : dramaLevel === 2 ? 0.2 : dramaLevel === 0 ? 0.45 : 0.35;
+  const counterChanceMultiplier =
+    typeof options.counterChanceMultiplier === "number" && isFinite(options.counterChanceMultiplier) && options.counterChanceMultiplier >= 0
+      ? options.counterChanceMultiplier
+      : 1;
+  const counterChance = (dramaLevel === 3 ? 0.06 : dramaLevel === 2 ? 0.12 : dramaLevel === 0 ? 0.3 : 0.22) * counterChanceMultiplier;
 
   // Acceleration factor for explosive moves (front-loads the move)
   const useAcceleration = dramaLevel >= 2;
@@ -111,12 +130,13 @@ export const createTargetRunout = (startPrice: number, targetPrice: number): Can
     // Momentum candles for dramatic moves
     const momentumMultiplier = dramaLevel === 3 ? 1.8 + Math.random() * 0.8 : dramaLevel === 2 ? 1.3 + Math.random() * 0.5 : 1;
 
-    const wiggle = (Math.random() - 0.5) * Math.abs(stepSize) * (dramaLevel === 0 ? 1.2 : 0.6);
+    const wiggle = (Math.random() - 0.5) * Math.abs(stepSize) * (dramaLevel === 0 ? 0.7 : 0.35);
     let close = previousClose + stepSize * momentumMultiplier + wiggle;
 
     const reverseBar = Math.random() < counterChance;
     if (reverseBar) {
-      const reverseSize = Math.abs(stepSize) * (0.2 + Math.random() * 0.6);
+      const reverseFactor = dramaLevel >= 2 ? 0.06 + Math.random() * 0.14 : 0.1 + Math.random() * 0.2;
+      const reverseSize = Math.abs(stepSize) * reverseFactor;
       close = previousClose - direction * reverseSize + (Math.random() - 0.5) * Math.abs(stepSize) * 0.2;
     } else {
       close = direction > 0 ? Math.max(close, previousClose + Math.abs(stepSize) * 0.2) : Math.min(close, previousClose - Math.abs(stepSize) * 0.2);

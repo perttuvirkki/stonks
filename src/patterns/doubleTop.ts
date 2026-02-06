@@ -2,7 +2,7 @@ import type { Candle, PatternDefinition, PatternLine, PatternResult } from "../t
 import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
-const PATTERN_LENGTH = 128;
+const PATTERN_LENGTH = 192;
 
 const buildPivotIndices = (length: number, fractions: number[]): number[] => {
   const maxIndex = Math.max(0, length - 1);
@@ -40,14 +40,14 @@ const generateDoubleTop = (
   const neckline = clamp(startPrice * (0.982 + Math.random() * 0.006), MIN_PRICE + minPad, MAX_PRICE - minPad);
   const necklineStart = neckline;
   const necklineEnd = neckline;
-  const peakLeft = clamp(neckline + pct(0.03 + Math.random() * 0.012), neckline + pct(0.018), MAX_PRICE - minPad);
-  const peakRight = clamp(peakLeft * (0.997 + Math.random() * 0.008), neckline + pct(0.016), MAX_PRICE - minPad);
+  const peakLeft = clamp(neckline + pct(0.045 + Math.random() * 0.018), neckline + pct(0.03), MAX_PRICE - minPad);
+  const peakRight = clamp(peakLeft * (0.994 + Math.random() * 0.01), neckline + pct(0.028), MAX_PRICE - minPad);
   const height = Math.max(peakLeft, peakRight) - neckline;
-  const preRallyLow = clamp(neckline - height * (0.62 + Math.random() * 0.16), MIN_PRICE + minPad, neckline - pct(0.004));
-  const breakdown = clamp(neckline - height * (0.35 + Math.random() * 0.15), MIN_PRICE + minPad, neckline - pct(0.004));
-  const continuation1 = clamp(neckline - height * (0.55 + Math.random() * 0.15), MIN_PRICE + minPad, breakdown - pct(0.003));
-  const continuation2 = clamp(neckline - height * (0.75 + Math.random() * 0.15), MIN_PRICE + minPad, continuation1 - pct(0.003));
-  const continuation3 = clamp(neckline - height * (0.90 + Math.random() * 0.15), MIN_PRICE + minPad, continuation2 - pct(0.002));
+  const preRallyLow = clamp(neckline - height * (0.8 + Math.random() * 0.2), MIN_PRICE + minPad, neckline - pct(0.004));
+  const breakdown = clamp(neckline - height * (0.5 + Math.random() * 0.2), MIN_PRICE + minPad, neckline - pct(0.004));
+  const continuation1 = clamp(neckline - height * (0.8 + Math.random() * 0.2), MIN_PRICE + minPad, breakdown - pct(0.003));
+  const continuation2 = clamp(neckline - height * (1.1 + Math.random() * 0.25), MIN_PRICE + minPad, continuation1 - pct(0.003));
+  const continuation3 = clamp(neckline - height * (1.35 + Math.random() * 0.25), MIN_PRICE + minPad, continuation2 - pct(0.002));
 
   const edgeBuffer = pct(0.0009);
   const wickUnit = pct(0.0016);
@@ -144,7 +144,7 @@ export const doubleTopPattern: PatternDefinition = {
     const { candles, necklineStart, necklineEnd, peakLeft, peakRight } = generateDoubleTop(startPrice, PATTERN_LENGTH);
     const necklineFloor = Math.min(necklineStart, necklineEnd);
     const height = Math.max(peakLeft, peakRight) - necklineFloor;
-    const targetPrice = clamp(necklineEnd - height, MIN_PRICE, MAX_PRICE);
+    const targetPrice = clamp(necklineEnd - height * 1.4, MIN_PRICE, MAX_PRICE);
     const lines: PatternLine[] = [
       {
         id: "double-top-neckline",

@@ -2,7 +2,7 @@ import type { Candle, PatternDefinition, PatternLine, PatternResult } from "../t
 import { MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
 
-const PATTERN_LENGTH = 128;
+const PATTERN_LENGTH = 192;
 
 const buildPivotIndices = (length: number, fractions: number[]): number[] => {
   const maxIndex = Math.max(0, length - 1);
@@ -37,14 +37,14 @@ const generateReverseHeadAndShoulders = (
 } => {
   const pct = (value: number) => startPrice * value;
   const minPad = pct(0.015);
-  const necklineStart = clamp(startPrice * 1.02, MIN_PRICE + minPad, MAX_PRICE - minPad);
-  const necklineEnd = clamp(startPrice * 1.025, MIN_PRICE + minPad, MAX_PRICE - minPad);
+  const necklineStart = clamp(startPrice * 1.025, MIN_PRICE + minPad, MAX_PRICE - minPad);
+  const necklineEnd = clamp(startPrice * 1.03, MIN_PRICE + minPad, MAX_PRICE - minPad);
   const shoulderLeftMax = Math.max(MIN_PRICE + minPad, necklineStart - pct(0.012));
-  const shoulderLeft = clamp(startPrice * 0.975, MIN_PRICE + minPad, shoulderLeftMax);
+  const shoulderLeft = clamp(startPrice * 0.97, MIN_PRICE + minPad, shoulderLeftMax);
   const shoulderRightMax = Math.max(MIN_PRICE + minPad, necklineEnd - pct(0.01));
-  const shoulderRight = clamp(startPrice * 0.978, MIN_PRICE + minPad, shoulderRightMax);
+  const shoulderRight = clamp(startPrice * 0.972, MIN_PRICE + minPad, shoulderRightMax);
   const headMax = Math.max(MIN_PRICE + minPad, Math.min(shoulderLeft, shoulderRight) - pct(0.006));
-  const head = clamp(startPrice * 0.95, MIN_PRICE + minPad, headMax);
+  const head = clamp(startPrice * 0.93, MIN_PRICE + minPad, headMax);
   const edgeBuffer = pct(0.0009);
   const wickUnit = pct(0.0016);
   const noiseUnit = pct(0.0006);
@@ -158,7 +158,7 @@ export const reverseHeadAndShouldersPattern: PatternDefinition = {
   generate: (startPrice): PatternResult => {
     const { candles, necklineStart, necklineEnd, shoulderLeft, shoulderRight, head } = generateReverseHeadAndShoulders(startPrice, PATTERN_LENGTH);
     const height = necklineStart - head;
-    const targetPrice = clamp(necklineEnd + height, MIN_PRICE, MAX_PRICE);
+    const targetPrice = clamp(necklineEnd + height * 1.4, MIN_PRICE, MAX_PRICE);
     const lines: PatternLine[] = [
       {
         id: "reverse-head-and-shoulders-neckline",

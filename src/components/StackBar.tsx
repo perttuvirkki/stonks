@@ -7,7 +7,6 @@ import TwemojiLineChart from "../../assets/twemoji/1f4c8.svg";
 import TwemojiWavyDash from "../../assets/twemoji/3030.svg";
 import TwemojiBarChart from "../../assets/twemoji/1f4ca.svg";
 import TwemojiGear from "../../assets/twemoji/2699.svg";
-import TwemojiTrophy from "../../assets/twemoji/1f3c6.svg";
 
 export type ChartType = "candles" | "line" | "area" | "baseline";
 
@@ -25,7 +24,6 @@ export type StackBarProps = {
   onTestRocketToast?: () => void;
   openSettings: () => void;
   openPatterns: () => void;
-  openLeaderboard: () => void;
   minorVariant: ButtonVariant;
   styles: Record<string, any>;
 };
@@ -44,7 +42,6 @@ export function StackBar({
   onTestRocketToast,
   openSettings,
   openPatterns,
-  openLeaderboard,
   minorVariant,
   styles,
 }: StackBarProps) {
@@ -84,15 +81,6 @@ export function StackBar({
             <TwemojiBarChart width={22} height={22} />
           </UiButton>
         )}
-        <UiButton
-          onPress={openLeaderboard}
-          variant={minorVariant}
-          controlSize="regular"
-          style={[styles.settingsButton, darkMode && styles.settingsButtonDark]}
-          darkMode={darkMode}
-        >
-          <TwemojiTrophy width={22} height={22} />
-        </UiButton>
         <UiButton
           onPress={cycleChartType}
           variant={minorVariant}
