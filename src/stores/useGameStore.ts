@@ -68,10 +68,15 @@ type GameState = {
   darkMode: boolean;
   reviewPromptShown: boolean;
   lifetimeStats: LifetimeStats;
+  quoteStackBonusTotal: number;
+  quotePendingProBonus: number;
+  dailyQuoteLastClaimDayKey: string | null;
   addScore: (score: number) => void;
   clearScores: () => void;
   setIsPro: (status: boolean) => void;
   setReviewPromptShown: (status: boolean) => void;
+  claimDailyQuoteBonus: (dayKey: string, amount: number, pendingProBonusAmount?: number) => boolean;
+  releasePendingProQuoteBonus: () => number;
   recordRoundEnd: (stats: {
     tradesWon: number;
     tradesLost: number;
@@ -97,6 +102,9 @@ export const useGameStore = create<GameState>()(
       darkMode: false,
       reviewPromptShown: false,
       lifetimeStats: DEFAULT_LIFETIME_STATS,
+      quoteStackBonusTotal: 0,
+      quotePendingProBonus: 0,
+      dailyQuoteLastClaimDayKey: null,
       addScore: (score) =>
         set((state) => {
           const newScore: HighScore = {
@@ -115,6 +123,38 @@ export const useGameStore = create<GameState>()(
       setIsPro: (status) => set({ isPro: status }),
       setDarkMode: (status) => set({ darkMode: status }),
       setReviewPromptShown: (status) => set({ reviewPromptShown: status }),
+      claimDailyQuoteBonus: (dayKey, amount, pendingProBonusAmount = 0) => {
+        if (!dayKey || amount <= 0) {
+          return false;
+        }
+        let didClaim = false;
+        set((state) => {
+          if (state.dailyQuoteLastClaimDayKey === dayKey) {
+            return {};
+          }
+          didClaim = true;
+          return {
+            dailyQuoteLastClaimDayKey: dayKey,
+            quoteStackBonusTotal: Math.max(0, state.quoteStackBonusTotal + amount),
+            quotePendingProBonus: Math.max(0, state.quotePendingProBonus + Math.max(0, pendingProBonusAmount)),
+          };
+        });
+        return didClaim;
+      },
+      releasePendingProQuoteBonus: () => {
+        let releasedAmount = 0;
+        set((state) => {
+          releasedAmount = Math.max(0, state.quotePendingProBonus);
+          if (releasedAmount <= 0) {
+            return {};
+          }
+          return {
+            quotePendingProBonus: 0,
+            quoteStackBonusTotal: Math.max(0, state.quoteStackBonusTotal + releasedAmount),
+          };
+        });
+        return releasedAmount;
+      },
       recordRoundEnd: (stats) =>
         set((state) => {
           const ls = state.lifetimeStats;

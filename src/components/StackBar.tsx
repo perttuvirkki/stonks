@@ -5,8 +5,7 @@ import { UiButton, type ButtonVariant } from "./UiButton";
 import TwemojiCandle from "../../assets/twemoji/1f56f.svg";
 import TwemojiLineChart from "../../assets/twemoji/1f4c8.svg";
 import TwemojiWavyDash from "../../assets/twemoji/3030.svg";
-import TwemojiBarChart from "../../assets/twemoji/1f4ca.svg";
-import TwemojiGear from "../../assets/twemoji/2699.svg";
+import TwemojiWheel from "../../assets/twemoji/1f6de.svg";
 
 export type ChartType = "candles" | "line" | "area" | "baseline";
 
@@ -18,11 +17,12 @@ export type StackBarProps = {
   wagerPercentUsed: number;
   wagerAmount: number;
   roundSecondsRemaining?: number | null;
+  trainingMode?: boolean;
   darkMode: boolean;
   chartType: ChartType;
   setChartType: (nextType: ChartType) => void;
   onTestRocketToast?: () => void;
-  openSettings: () => void;
+  openMenu: () => void;
   openPatterns: () => void;
   minorVariant: ButtonVariant;
   styles: Record<string, any>;
@@ -36,11 +36,12 @@ export function StackBar({
   wagerPercentUsed,
   wagerAmount,
   roundSecondsRemaining,
+  trainingMode = false,
   darkMode,
   chartType,
   setChartType,
   onTestRocketToast,
-  openSettings,
+  openMenu,
   openPatterns,
   minorVariant,
   styles,
@@ -64,13 +65,34 @@ export function StackBar({
   };
 
   return (
-    <View style={[styles.stackBar, darkMode && styles.stackBarDark]}>
-      <View>
-        <Text style={[styles.stackLabel, darkMode && styles.stackLabelDark]}>Stack</Text>
-        <Text style={[styles.stackValue, darkMode && styles.stackValueDark]}>${formatMoney(stackBalance)}</Text>
+    <View style={[styles.stackBar, darkMode && styles.stackBarDark, trainingMode && styles.stackBarTraining]}>
+      <View style={styles.stackLeft}>
+        <UiButton
+          onPress={openMenu}
+          variant={minorVariant}
+          controlSize="regular"
+          style={[styles.settingsButton, darkMode && styles.settingsButtonDark]}
+          darkMode={darkMode}
+        >
+          <View style={styles.menuBurgerGlyph}>
+            <View style={[styles.menuBurgerLine, darkMode && styles.menuBurgerLineDark]} />
+            <View style={[styles.menuBurgerLine, darkMode && styles.menuBurgerLineDark]} />
+            <View style={[styles.menuBurgerLine, darkMode && styles.menuBurgerLineDark]} />
+          </View>
+        </UiButton>
+        {trainingMode ? (
+          <View style={styles.stackTrainingWrap}>
+            <Text style={[styles.stackTrainingText, darkMode && styles.stackTrainingTextDark]}>Training Wheels</Text>
+          </View>
+        ) : (
+          <View>
+            <Text style={[styles.stackLabel, darkMode && styles.stackLabelDark]}>Stack</Text>
+            <Text style={[styles.stackValue, darkMode && styles.stackValueDark]}>${formatMoney(stackBalance)}</Text>
+          </View>
+        )}
       </View>
       <View style={styles.stackBarRight}>
-        {roundSecondsRemaining == null && (
+        {roundSecondsRemaining == null && trainingMode && (
           <UiButton
             onPress={openPatterns}
             variant={minorVariant}
@@ -78,7 +100,7 @@ export function StackBar({
             style={[styles.settingsButton, darkMode && styles.settingsButtonDark]}
             darkMode={darkMode}
           >
-            <TwemojiBarChart width={22} height={22} />
+            <TwemojiWheel width={22} height={22} />
           </UiButton>
         )}
         <UiButton
@@ -100,14 +122,6 @@ export function StackBar({
             darkMode={darkMode}
           />
         ) : null}
-        <UiButton
-          onPress={openSettings}
-          variant={minorVariant}
-          style={[styles.settingsButton, darkMode && styles.settingsButtonDark]}
-          darkMode={darkMode}
-        >
-          <TwemojiGear width={22} height={22} />
-        </UiButton>
       </View>
     </View>
   );

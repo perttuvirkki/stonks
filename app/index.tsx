@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Platform, Pressable, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { memo, type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
-import Animated, { Easing, FadeIn, FadeOut, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 import * as SplashScreen from "expo-splash-screen";
@@ -14,7 +14,6 @@ import { AnimatedSplash } from "../src/components/AnimatedSplash";
 import { MarginCallOverlay, type MarginCallVariant } from "../src/components/MarginCallOverlay";
 import { PatternSettingsModal } from "../src/components/PatternSettingsModal";
 import { ProFeaturesModal } from "../src/components/ProFeaturesModal";
-import { SettingsMenuModal, type SettingsMenuOption } from "../src/components/SettingsMenuModal";
 import { TopScoreModal } from "../src/components/TopScoreModal";
 import { TotalStatsModal } from "../src/components/TotalStatsModal";
 import { ProfitToast } from "../src/components/ProfitToast";
@@ -25,10 +24,17 @@ import { RevenueCatProvider, useRevenueCat } from "../src/contexts/RevenueCatCon
 import { useGameStore } from "../src/stores/useGameStore";
 import TwemojiRocket from "../assets/twemoji/1f680.svg";
 import TwemojiTrophy from "../assets/twemoji/1f3c6.svg";
-
+import TwemojiBarChart from "../assets/twemoji/1f4ca.svg";
+import TwemojiChartUp from "../assets/twemoji/1f4c8.svg";
+import TwemojiMoneyBag from "../assets/twemoji/1f4b0.svg";
 import TwemojiCoin from "../assets/twemoji/1fa99.svg";
 import TwemojiWheel from "../assets/twemoji/1f6de.svg";
 import TwemojiBanknote from "../assets/twemoji/1f4b5.svg";
+import TwemojiLock from "../assets/twemoji/1f512.svg";
+import TwemojiStar from "../assets/twemoji/2b50.svg";
+import TwemojiMoon from "../assets/twemoji/1f319.svg";
+import TwemojiRestore from "../assets/twemoji/1f504.svg";
+import TwemojiWrench from "../assets/twemoji/1f527.svg";
 import TwemojiFreezingFace from "../assets/twemoji/1f976.svg";
 import TwemojiHotFace from "../assets/twemoji/1f975.svg";
 import TwemojiSkull from "../assets/twemoji/1f480.svg";
@@ -71,6 +77,9 @@ type TradeToast = {
   percent: number;
 };
 
+type LaunchScreen = "menu" | "dailyQuote" | "settings" | "game";
+type GameMode = "sprint60" | "fiveTrades" | "training";
+
 const CHART_BOTTOM_INSET = 110;
 const TOP_SHEET_OFFSET = -240;
 const TRADE_SHEET_DETENTS = [0.18];
@@ -85,12 +94,56 @@ const MAINTENANCE_MARGIN = 0.005;
 const ROUND_DURATION_MS = 60_000;
 const ROUND_END_SLOW_TICK_MS = 300;
 const ROUND_END_SHEET_DELAY_MS = 900;
+const FIVE_TRADES_TARGET = 5;
+type DailyMoneyQuote = {
+  text: string;
+  author: string;
+};
+
+type SettingsRow = {
+  id: string;
+  label: string;
+  subtitle: string;
+  icon: ComponentType<{ width?: number | string; height?: number | string }>;
+  onPress: () => void;
+};
+
+type SettingsSection = {
+  id: string;
+  title: string;
+  rows: SettingsRow[];
+};
+
+const DAILY_MONEY_QUOTES: DailyMoneyQuote[] = [
+  { text: "The stock market is a device for transferring money from the impatient to the patient.", author: "Warren Buffett" },
+  { text: "Risk comes from not knowing what you are doing.", author: "Warren Buffett" },
+  { text: "Know what you own, and know why you own it.", author: "Peter Lynch" },
+  { text: "The four most dangerous words in investing are: this time it's different.", author: "Sir John Templeton" },
+  { text: "Price is what you pay. Value is what you get.", author: "Warren Buffett" },
+  { text: "In investing, what is comfortable is rarely profitable.", author: "Robert Arnott" },
+  { text: "An investment in knowledge pays the best interest.", author: "Benjamin Franklin" },
+  { text: "The individual investor should act consistently as an investor and not as a speculator.", author: "Ben Graham" },
+];
 
 type ChartSpeedMs = 100 | 125 | 150 | 175 | 200;
 
 // Estimate used for UI messaging (pattern length + typical resolve/spawn overhead).
 const ESTIMATED_CANDLES_PER_PATTERN_CYCLE = 117;
 const SPEED_HINT_DURATION_MS = 1600;
+
+const getDailyMoneyQuote = () => {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / 86_400_000);
+  return DAILY_MONEY_QUOTES[Math.abs(dayOfYear) % DAILY_MONEY_QUOTES.length] ?? DAILY_MONEY_QUOTES[0];
+};
+
+const getLocalDayKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 const CHART_HTML = [
   "<!doctype html>",
@@ -1295,6 +1348,11 @@ function AppContent() {
   const lifetimeRounds = useGameStore((state) => state.lifetimeStats.totalRounds);
   const lifetimeTotalProfit = useGameStore((state) => state.lifetimeStats.totalProfit);
   const lifetimeTotalLoss = useGameStore((state) => state.lifetimeStats.totalLoss);
+  const quoteStackBonusTotal = useGameStore((state) => state.quoteStackBonusTotal);
+  const quotePendingProBonus = useGameStore((state) => state.quotePendingProBonus);
+  const dailyQuoteLastClaimDayKey = useGameStore((state) => state.dailyQuoteLastClaimDayKey);
+  const claimDailyQuoteBonus = useGameStore((state) => state.claimDailyQuoteBonus);
+  const releasePendingProQuoteBonus = useGameStore((state) => state.releasePendingProQuoteBonus);
   const reviewPromptShown = useGameStore((state) => state.reviewPromptShown);
   const setReviewPromptShown = useGameStore((state) => state.setReviewPromptShown);
   const webViewRef = useRef<WebView>(null);
@@ -1303,13 +1361,24 @@ function AppContent() {
   const [isWebReady, setIsWebReady] = useState(false);
   // Show our custom splash immediately so Android doesn't briefly flash the game UI before the animation.
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
+  const [launchScreen, setLaunchScreen] = useState<LaunchScreen>("menu");
+  const [gameMode, setGameMode] = useState<GameMode>("sprint60");
+  const gameModeRef = useRef<GameMode>("sprint60");
+  const [isRoundActive, setIsRoundActive] = useState(false);
+  const [roundTradesMade, setRoundTradesMade] = useState(0);
+  const dailyMoneyQuote = useMemo(() => getDailyMoneyQuote(), []);
+  const dailyMoneyDateLine = useMemo(
+    () => new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }).toUpperCase(),
+    []
+  );
+  const todayDayKey = getLocalDayKey();
+  const canClaimDailyQuote = dailyQuoteLastClaimDayKey !== todayDayKey;
   const [isChartFollowing, setIsChartFollowing] = useState(true);
 
   const [isMarginCallVisible, setIsMarginCallVisible] = useState(false);
   const isMarginCallVisibleRef = useRef(false);
   const [isTopScoreVisible, setIsTopScoreVisible] = useState(false);
   const [isTotalStatsVisible, setIsTotalStatsVisible] = useState(false);
-  const [isSettingsMenuVisible, setIsSettingsMenuVisible] = useState(false);
   const [marginCallVariant, setMarginCallVariant] = useState<MarginCallVariant>("classic");
   const [baseTickMs, setBaseTickMs] = useState<ChartSpeedMs>(TICK_MS as ChartSpeedMs);
   const baseTickMsRef = useRef<number>(TICK_MS);
@@ -1325,6 +1394,8 @@ function AppContent() {
   const [isPatternSettingsVisible, setIsPatternSettingsVisible] = useState(false);
   const [currentPatternLabel, setCurrentPatternLabel] = useState<string | null>(null);
   const roundEndsAtRef = useRef<number | null>(null);
+  const roundStartedAtRef = useRef<number | null>(null);
+  const roundModeRef = useRef<GameMode>("sprint60");
   const roundStartNetWorthRef = useRef(0);
   const roundStatsRef = useRef<RoundStats>({
     tradesMade: 0,
@@ -1348,15 +1419,21 @@ function AppContent() {
   const enabledPatternIdsRef = useRef<string[]>(allPatterns.map((pattern) => pattern.id));
   const [chartType, setChartType] = useState<ChartType>("candles");
   const [zoomPreset, setZoomPreset] = useState<1 | 2 | 3>(2);
-  const initialStackBalance = isPro ? 200 : 100;
+  const baseInitialStackBalance = isPro ? 200 : 100;
+  const initialStackBalance = baseInitialStackBalance + quoteStackBonusTotal;
   const stackBalanceRef = useRef(initialStackBalance);
   const positionsRef = useRef<Position[]>([]);
   const [positionCount, setPositionCount] = useState(0); // Track position count for re-renders
   const [stackBalance, setStackBalance] = useState(initialStackBalance);
+  const previousInitialStackBalanceRef = useRef(initialStackBalance);
 
   useEffect(() => {
     baseTickMsRef.current = baseTickMs;
   }, [baseTickMs]);
+
+  useEffect(() => {
+    gameModeRef.current = gameMode;
+  }, [gameMode]);
 
   useEffect(() => {
     isOvertimeRef.current = isOvertime;
@@ -1368,6 +1445,7 @@ function AppContent() {
   const [tradeToast, setTradeToast] = useState<TradeToast | null>(null);
   const [showStartHint, setShowStartHint] = useState(false);
   const [showSpeedHint, setShowSpeedHint] = useState(false);
+  const [isInGameBannerDismissed, setIsInGameBannerDismissed] = useState(false);
   const [speedHintText, setSpeedHintText] = useState<string>("");
   const speedHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [overtimeBurstTrigger, setOvertimeBurstTrigger] = useState(0);
@@ -1377,11 +1455,51 @@ function AppContent() {
   const [rocketBurstTrigger, setRocketBurstTrigger] = useState(0);
   const [moneyPrinterTrigger, setMoneyPrinterTrigger] = useState(0);
   const toastTranslateY = useSharedValue(TOP_SHEET_OFFSET);
+  const quoteCashDropProgress = useSharedValue(0);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTradeLabelRef = useRef<string>("Trade");
   const [isProFeaturesVisible, setIsProFeaturesVisible] = useState(false);
   const didTryReviewPromptRef = useRef(false);
+
+  const quoteCashDropStyle1 = useAnimatedStyle(() => {
+    const raw = quoteCashDropProgress.value / 0.78;
+    const p = Math.min(Math.max(raw, 0), 1);
+    const fadeIn = p < 0.18 ? p / 0.18 : 1;
+    const fadeOut = p > 0.82 ? (1 - p) / 0.18 : 1;
+    const opacity = Math.max(0, Math.min(fadeIn, fadeOut));
+
+    return {
+      opacity,
+      transform: [{ translateY: -92 + p * 92 }, { translateX: -24 * (1 - p) }, { scale: 0.82 + p * 0.18 }],
+    };
+  });
+
+  const quoteCashDropStyle2 = useAnimatedStyle(() => {
+    const raw = (quoteCashDropProgress.value - 0.1) / 0.74;
+    const p = Math.min(Math.max(raw, 0), 1);
+    const fadeIn = p < 0.18 ? p / 0.18 : 1;
+    const fadeOut = p > 0.82 ? (1 - p) / 0.18 : 1;
+    const opacity = Math.max(0, Math.min(fadeIn, fadeOut));
+
+    return {
+      opacity,
+      transform: [{ translateY: -100 + p * 100 }, { translateX: 0 }, { scale: 0.82 + p * 0.18 }],
+    };
+  });
+
+  const quoteCashDropStyle3 = useAnimatedStyle(() => {
+    const raw = (quoteCashDropProgress.value - 0.2) / 0.68;
+    const p = Math.min(Math.max(raw, 0), 1);
+    const fadeIn = p < 0.18 ? p / 0.18 : 1;
+    const fadeOut = p > 0.82 ? (1 - p) / 0.18 : 1;
+    const opacity = Math.max(0, Math.min(fadeIn, fadeOut));
+
+    return {
+      opacity,
+      transform: [{ translateY: -108 + p * 108 }, { translateX: 24 * (1 - p) }, { scale: 0.82 + p * 0.18 }],
+    };
+  });
 
   const formatPatternsPerMinute = useCallback((ms: number): string => {
     const ppm = 60_000 / (ms * ESTIMATED_CANDLES_PER_PATTERN_CYCLE);
@@ -1394,7 +1512,7 @@ function AppContent() {
       setBaseTickMs(next);
       setTickMs((current) => (current === baseTickMsRef.current ? next : current));
 
-      if (didChange && roundSecondsRemaining === null) {
+      if (didChange && !isRoundActive) {
         if (speedHintTimeoutRef.current) {
           clearTimeout(speedHintTimeoutRef.current);
           speedHintTimeoutRef.current = null;
@@ -1407,29 +1525,63 @@ function AppContent() {
         }, SPEED_HINT_DURATION_MS);
       }
     },
-    [formatPatternsPerMinute, roundSecondsRemaining],
+    [formatPatternsPerMinute, isRoundActive],
   );
 
   useEffect(() => {
-    if (roundSecondsRemaining !== null && showSpeedHint) {
+    if (isRoundActive && showSpeedHint) {
       setShowSpeedHint(false);
       if (speedHintTimeoutRef.current) {
         clearTimeout(speedHintTimeoutRef.current);
         speedHintTimeoutRef.current = null;
       }
     }
-  }, [roundSecondsRemaining, showSpeedHint]);
+  }, [isRoundActive, showSpeedHint]);
+
+  useEffect(() => {
+    const hasOvertimeBanner = isOvertime && positionCount > 0 && !isRoundResultsVisible && !isMarginCallVisible;
+    if (!showStartHint && !showSpeedHint && !hasOvertimeBanner) {
+      setIsInGameBannerDismissed(false);
+    }
+  }, [showStartHint, showSpeedHint, isOvertime, positionCount, isRoundResultsVisible, isMarginCallVisible]);
+
+  useEffect(() => {
+    const previousInitial = previousInitialStackBalanceRef.current;
+    if (previousInitial === initialStackBalance) {
+      return;
+    }
+
+    if (!positionsRef.current.length && !isRoundActive && !isRoundResultsVisible && !isMarginCallVisible) {
+      stackBalanceRef.current = initialStackBalance;
+      setStackBalance(initialStackBalance);
+    }
+    previousInitialStackBalanceRef.current = initialStackBalance;
+  }, [initialStackBalance, isMarginCallVisible, isRoundActive, isRoundResultsVisible]);
 
   useEffect(() => {
     // Top up balance if user becomes Pro and hasn't started trading yet (simple check)
     // or just let them enjoy it on next round.
     // If they buy Pro before trading, top up the start stack.
-    if (isPro && stackBalanceRef.current === 100) {
-      const newBalance = 200;
+    const nonProInitial = 100 + quoteStackBonusTotal;
+    const proInitial = 200 + quoteStackBonusTotal;
+    if (isPro && stackBalanceRef.current === nonProInitial) {
+      const newBalance = proInitial;
       setStackBalance(newBalance);
       stackBalanceRef.current = newBalance;
     }
-  }, [isPro]);
+  }, [isPro, quoteStackBonusTotal]);
+
+  useEffect(() => {
+    if (!isPro || quotePendingProBonus <= 0) {
+      return;
+    }
+    const released = releasePendingProQuoteBonus();
+    if (released > 0) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
+        // Ignore.
+      });
+    }
+  }, [isPro, quotePendingProBonus, releasePendingProQuoteBonus]);
   const leverageOption = LEVERAGE_OPTIONS[leverageIndex] ?? LEVERAGE_OPTIONS[0];
   const wagerPercent = leverageOption.percent;
   const wagerPercentUsed = useLeverage ? 1 : wagerPercent;
@@ -1488,6 +1640,8 @@ function AppContent() {
   const resetRoundState = () => {
     clearRoundTimers();
     roundEndsAtRef.current = null;
+    roundStartedAtRef.current = null;
+    roundModeRef.current = gameModeRef.current;
     roundStartNetWorthRef.current = 0;
     roundStatsRef.current = {
       tradesMade: 0,
@@ -1499,58 +1653,15 @@ function AppContent() {
       closestToLiquidation: 100,
     };
     setRoundSecondsRemaining(null);
+    setRoundTradesMade(0);
     setIsRoundResultsVisible(false);
     setIsRoundEnded(false);
     setIsOvertime(false);
+    setIsRoundActive(false);
   };
 
-  const closeAllPositionsAtPrice = (price: number, options: { showToast: boolean }) => {
-    if (positionsRef.current.length === 0) {
-      return;
-    }
-    const costBasis = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
-    const earliestEntry = Math.min(...positionsRef.current.map((p) => p.entryTime));
-    const tradeDuration = Date.now() - earliestEntry;
-    const proceeds = computeOpenProceeds(price);
-    const profit = proceeds - costBasis;
-    // In training wheels mode, don't update the actual balance
-    const nextBalance = showPatternLinesRef.current ? stackBalanceRef.current : normalizeBalance(stackBalanceRef.current + proceeds);
-    stackBalanceRef.current = nextBalance;
-    positionsRef.current = [];
-    setPositionCount(0);
-    setStackBalance(nextBalance);
-    sendPatternLines();
-    webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("sell"); true;`);
-
-    // Track trade stats during sprint round
-    if (roundEndsAtRef.current && costBasis > 0) {
-      const profitPercent = (profit / costBasis) * 100;
-      roundStatsRef.current.tradesMade += 1;
-      roundStatsRef.current.longestTrade = Math.max(roundStatsRef.current.longestTrade, tradeDuration);
-      if (profit > 0) {
-        roundStatsRef.current.tradesWon += 1;
-        roundStatsRef.current.biggestWinPercent = Math.max(roundStatsRef.current.biggestWinPercent, profitPercent);
-      } else if (profit < 0) {
-        roundStatsRef.current.tradesLost += 1;
-        roundStatsRef.current.biggestLossPercent = Math.max(roundStatsRef.current.biggestLossPercent, Math.abs(profitPercent));
-      }
-
-      // Record lifetime trade stats (if not training wheels)
-      if (!showPatternLinesRef.current) {
-        recordTrade(profit > 0, profit, profitPercent);
-      }
-    }
-
-    if (options.showToast && costBasis > 0) {
-      const percent = (profit / costBasis) * 100;
-      const kind = profit > 0 ? "profit" : profit < 0 ? "loss" : "flat";
-      showTradeToast({ amount: profit, percent, kind });
-    }
-  };
-
-  const finalizeSprintRound = () => {
-    const endsAt = roundEndsAtRef.current;
-    if (!endsAt) {
+  const finalizeActiveRound = () => {
+    if (!roundEndsAtRef.current) {
       return;
     }
     clearRoundTimers();
@@ -1558,28 +1669,32 @@ function AppContent() {
 
     if (isMarginCallVisibleRef.current || isRoundResultsVisibleRef.current) {
       roundEndsAtRef.current = null;
+      roundStartedAtRef.current = null;
+      setIsRoundActive(false);
       return;
     }
 
     // Immediately disable trading
     setIsRoundEnded(true);
     setIsOvertime(false);
+    setIsRoundActive(false);
 
     const price = getCurrentPrice() ?? BASE_PRICE;
     const startNetWorth = roundStartNetWorthRef.current || normalizeBalance(computeNetWorth(price));
     const endNetWorth = normalizeBalance(computeNetWorth(price));
     const profit = endNetWorth - startNetWorth;
     const percent = startNetWorth > 0 ? (profit / startNetWorth) * 100 : 0;
-    const startAt = endsAt - ROUND_DURATION_MS;
-    const durationMs = Math.max(ROUND_DURATION_MS, Date.now() - startAt);
+    const roundStartedAt = roundStartedAtRef.current ?? Date.now();
+    const elapsedMs = Math.max(0, Date.now() - roundStartedAt);
+    const durationMs = roundModeRef.current === "sprint60" ? Math.max(ROUND_DURATION_MS, elapsedMs) : elapsedMs;
 
-    // Close positions BEFORE clearing roundEndsAtRef so stats are tracked
+    // Close positions BEFORE clearing round refs so stats are tracked.
     if (positionsRef.current.length) {
-      closeAllPositionsAtPrice(price, { showToast: false });
+      closeAllPositionsAtPrice(price, { showToast: false, evaluateRoundCompletion: false });
     }
 
-    // Now clear the ref after positions are closed
     roundEndsAtRef.current = null;
+    roundStartedAtRef.current = null;
 
     setRoundResult({ startNetWorth, endNetWorth, profit, percent, durationMs, stats: { ...roundStatsRef.current } });
     setTickMs(ROUND_END_SLOW_TICK_MS);
@@ -1615,9 +1730,67 @@ function AppContent() {
     }, ROUND_END_SHEET_DELAY_MS);
   };
 
+  const closeAllPositionsAtPrice = (price: number, options: { showToast: boolean; evaluateRoundCompletion?: boolean }) => {
+    if (positionsRef.current.length === 0) {
+      return;
+    }
+    const costBasis = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
+    const earliestEntry = Math.min(...positionsRef.current.map((p) => p.entryTime));
+    const tradeDuration = Date.now() - earliestEntry;
+    const proceeds = computeOpenProceeds(price);
+    const profit = proceeds - costBasis;
+    // In training wheels mode, don't update the actual balance
+    const nextBalance = showPatternLinesRef.current ? stackBalanceRef.current : normalizeBalance(stackBalanceRef.current + proceeds);
+    stackBalanceRef.current = nextBalance;
+    positionsRef.current = [];
+    setPositionCount(0);
+    setStackBalance(nextBalance);
+    sendPatternLines();
+    webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("sell"); true;`);
+
+    // Track trade stats during active rounds.
+    if (roundEndsAtRef.current && costBasis > 0) {
+      const profitPercent = (profit / costBasis) * 100;
+      const tradesMade = roundStatsRef.current.tradesMade + 1;
+      roundStatsRef.current.tradesMade = tradesMade;
+      setRoundTradesMade(tradesMade);
+      roundStatsRef.current.longestTrade = Math.max(roundStatsRef.current.longestTrade, tradeDuration);
+      if (profit > 0) {
+        roundStatsRef.current.tradesWon += 1;
+        roundStatsRef.current.biggestWinPercent = Math.max(roundStatsRef.current.biggestWinPercent, profitPercent);
+      } else if (profit < 0) {
+        roundStatsRef.current.tradesLost += 1;
+        roundStatsRef.current.biggestLossPercent = Math.max(roundStatsRef.current.biggestLossPercent, Math.abs(profitPercent));
+      }
+
+      // Record lifetime trade stats (if not training wheels)
+      if (!showPatternLinesRef.current) {
+        recordTrade(profit > 0, profit, profitPercent);
+      }
+
+      const shouldFinalizeByTradeCount =
+        options.evaluateRoundCompletion !== false &&
+        roundModeRef.current === "fiveTrades" &&
+        tradesMade >= FIVE_TRADES_TARGET &&
+        positionsRef.current.length === 0;
+      if (shouldFinalizeByTradeCount) {
+        finalizeActiveRound();
+      }
+    }
+
+    if (options.showToast && costBasis > 0) {
+      const percent = (profit / costBasis) * 100;
+      const kind = profit > 0 ? "profit" : profit < 0 ? "loss" : "flat";
+      showTradeToast({ amount: profit, percent, kind });
+    }
+  };
+
   const endSprintRound = () => {
     const endsAt = roundEndsAtRef.current;
     if (!endsAt) {
+      return;
+    }
+    if (roundModeRef.current !== "sprint60") {
       return;
     }
     if (isOvertimeRef.current) {
@@ -1635,7 +1808,7 @@ function AppContent() {
       setOvertimeBurstTrigger(Date.now());
       return;
     }
-    finalizeSprintRound();
+    finalizeActiveRound();
   };
 
   const startSprintRoundIfNeeded = (price: number) => {
@@ -1649,6 +1822,10 @@ function AppContent() {
     if (showPatternLinesRef.current) {
       return;
     }
+    setIsRoundActive(true);
+    setRoundTradesMade(0);
+    roundModeRef.current = "sprint60";
+    roundStartedAtRef.current = Date.now();
     roundStartNetWorthRef.current = normalizeBalance(computeNetWorth(price));
     const endsAt = Date.now() + ROUND_DURATION_MS;
     roundEndsAtRef.current = endsAt;
@@ -1677,6 +1854,34 @@ function AppContent() {
       roundTimeoutRef.current = null;
       endSprintRound();
     }, ROUND_DURATION_MS);
+  };
+
+  const startFiveTradesRoundIfNeeded = (price: number) => {
+    if (roundEndsAtRef.current) {
+      return;
+    }
+    if (isMarginCallVisibleRef.current || isRoundResultsVisibleRef.current) {
+      return;
+    }
+    // Block game start if training wheels are ON (Pro feature)
+    if (showPatternLinesRef.current) {
+      return;
+    }
+    setIsRoundActive(true);
+    setRoundTradesMade(0);
+    roundModeRef.current = "fiveTrades";
+    roundStartedAtRef.current = Date.now();
+    roundStartNetWorthRef.current = normalizeBalance(computeNetWorth(price));
+    roundEndsAtRef.current = Number.POSITIVE_INFINITY;
+    setRoundSecondsRemaining(null);
+  };
+
+  const startRoundIfNeeded = (price: number) => {
+    if (gameModeRef.current === "fiveTrades") {
+      startFiveTradesRoundIfNeeded(price);
+      return;
+    }
+    startSprintRoundIfNeeded(price);
   };
 
   const wagerAmountRaw = wagerPercentUsed === 1 ? stackBalance : stackBalance * wagerPercentUsed;
@@ -1788,13 +1993,14 @@ function AppContent() {
   useEffect(() => {
     // Show start hint if we are idle and no other overlays are active
     if (
-      roundSecondsRemaining === null &&
+      launchScreen === "game" &&
+      !isRoundActive &&
+      !isRoundEnded &&
       !isMarginCallVisible &&
       !isRoundResultsVisible &&
       !isPatternSettingsVisible &&
       !isTopScoreVisible &&
       !isProFeaturesVisible &&
-      !isSettingsMenuVisible &&
       !showSpeedHint
     ) {
       const t = setTimeout(() => setShowStartHint(true), 2000);
@@ -1803,13 +2009,14 @@ function AppContent() {
       setShowStartHint(false);
     }
   }, [
-    roundSecondsRemaining,
+    launchScreen,
+    isRoundActive,
+    isRoundEnded,
     isMarginCallVisible,
     isRoundResultsVisible,
     isPatternSettingsVisible,
     isTopScoreVisible,
     isProFeaturesVisible,
-    isSettingsMenuVisible,
     showSpeedHint,
   ]);
 
@@ -1853,33 +2060,45 @@ function AppContent() {
   const handleBuyPro = async () => {
     const success = await purchasePro();
     if (success) {
+      const released = releasePendingProQuoteBonus();
+      if (released > 0) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
+          // Ignore.
+        });
+      }
       setIsProFeaturesVisible(false);
       // Optional: Show celebration or thank you
     }
   };
 
-  const settingsMenuOptions: SettingsMenuOption[] = useMemo(() => {
-    const darkModeOption = darkMode ? "Disable Dark Mode 🌙" : "Enable Dark Mode 🌙";
-    const buyProOption = proPrice ? `Buy PRO ✨ (${proPrice})` : "Buy PRO ✨";
-    const topScoresOption = "My top Scores 🏆";
-    const globalLeaderboardOption = "Global leaderboard (Best Round) 🏆";
-    const globalProfitLeaderboardOption = "Global leaderboard (All-time Profit) 💰";
-    const rateAppOption = "Rate this app ⭐️";
-    const debugProOption = debugProOverride ? "🔧 Disable Debug Pro" : "🔧 Enable Debug Pro";
-    const options: SettingsMenuOption[] = [
+  const settingsSections: SettingsSection[] = useMemo(() => {
+    const accountRows: SettingsRow[] = [
       {
         id: "topScores",
-        label: topScoresOption,
+        label: "My Top Scores",
+        subtitle: "View your best local runs.",
+        icon: TwemojiTrophy,
         onPress: () => setIsTopScoreVisible(true),
       },
       {
+        id: "totalStats",
+        label: "Total Stats",
+        subtitle: "Open your all-time performance breakdown.",
+        icon: TwemojiBarChart,
+        onPress: () => setIsTotalStatsVisible(true),
+      },
+      {
         id: "globalLeaderboard",
-        label: globalLeaderboardOption,
+        label: "Global Leaderboard (Best Round)",
+        subtitle: "Compare your best run worldwide.",
+        icon: TwemojiChartUp,
         onPress: () => GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE),
       },
       {
         id: "globalProfitLeaderboard",
-        label: globalProfitLeaderboardOption,
+        label: "Global Leaderboard (All-Time Profit)",
+        subtitle: "See where your long-term profit ranks.",
+        icon: TwemojiMoneyBag,
         onPress: () => {
           if (!GameCenter.LEADERBOARDS.NET_PROFIT) {
             Alert.alert("Not set up yet", "Add LEADERBOARD_NET_PROFIT_ANDROID / LEADERBOARD_NET_PROFIT_IOS to enable this leaderboard.");
@@ -1888,14 +2107,14 @@ function AppContent() {
           GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.NET_PROFIT);
         },
       },
-      {
-        id: "totalStats",
-        label: "Total Stats 📊",
-        onPress: () => setIsTotalStatsVisible(true),
-      },
+    ];
+
+    const appRows: SettingsRow[] = [
       {
         id: "rate",
-        label: rateAppOption,
+        label: "Rate This App",
+        subtitle: "Leave a review in the App Store / Play Store.",
+        icon: TwemojiStar,
         onPress: () => {
           void (async () => {
             if (await StoreReview.hasAction()) {
@@ -1906,64 +2125,68 @@ function AppContent() {
           })();
         },
       },
+      {
+        id: "darkMode",
+        label: darkMode ? "Disable Dark Mode" : "Enable Dark Mode",
+        subtitle: isPro ? "Toggle your preferred app theme." : "Unlock Pro to use dark mode.",
+        icon: TwemojiMoon,
+        onPress: () => {
+          if (!isPro) {
+            setIsProFeaturesVisible(true);
+            return;
+          }
+          setDarkMode(!darkMode);
+        },
+      },
+      {
+        id: "buyPro",
+        label: isPro ? "Pro Active" : proPrice ? `Buy Pro (${proPrice})` : "Buy Pro",
+        subtitle: isPro ? "Thanks for supporting the game." : "Unlock all premium features.",
+        icon: TwemojiLock,
+        onPress: () => {
+          if (isPro) {
+            return;
+          }
+          setIsProFeaturesVisible(true);
+        },
+      },
+      {
+        id: "restore",
+        label: "Restore Purchases",
+        subtitle: "Recover previous Pro purchases on this device.",
+        icon: TwemojiRestore,
+        onPress: () => {
+          void restorePurchases();
+        },
+      },
     ];
 
-    if (isPro) {
-      options.push({
-        id: "darkMode",
-        label: darkModeOption,
-        onPress: () => setDarkMode(!darkMode),
-      });
-    } else {
-      options.push(
-        {
-          id: "buyPro",
-          label: buyProOption,
-          onPress: () => setIsProFeaturesVisible(true),
-        },
-        {
-          id: "restore",
-          label: "Restore Purchases",
-          onPress: () => {
-            void restorePurchases();
-          },
-        },
-      );
-    }
+    const sections: SettingsSection[] = [
+      { id: "account", title: "Account", rows: accountRows },
+      { id: "app", title: "App", rows: appRows },
+    ];
 
     if (__DEV__) {
-      options.push({
-        id: "debugPro",
-        label: debugProOption,
-        onPress: () => setDebugProOverride((prev) => !prev),
+      sections.push({
+        id: "developer",
+        title: "Developer",
+        rows: [
+          {
+            id: "debugPro",
+            label: debugProOverride ? "Disable Debug Pro" : "Enable Debug Pro",
+            subtitle: "Local-only test override for Pro state.",
+            icon: TwemojiWrench,
+            onPress: () => setDebugProOverride((prev) => !prev),
+          },
+        ],
       });
     }
 
-    return options;
-  }, [darkMode, debugProOverride, isPro, proPrice, restorePurchases]);
+    return sections;
+  }, [darkMode, debugProOverride, isPro, proPrice, restorePurchases, setDarkMode]);
 
   const openSettings = () => {
-    if (Platform.OS === "ios") {
-      const options = [...settingsMenuOptions.map((o) => o.label), "Cancel"];
-      const cancelIndex = options.length - 1;
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: isPro ? "Pro Member 🏆" : undefined,
-          options,
-          cancelButtonIndex: cancelIndex,
-          userInterfaceStyle: darkMode ? "dark" : "light",
-        },
-        (index) => {
-          const picked = settingsMenuOptions[index];
-          if (!picked) return;
-          picked.onPress();
-        },
-      );
-      return;
-    }
-
-    // Android: use an in-app menu (RN Alert supports max 3 buttons and can become impossible to dismiss).
-    setIsSettingsMenuVisible(true);
+    setLaunchScreen("settings");
   };
 
   const pickMarginCallVariant = (): MarginCallVariant => {
@@ -2076,7 +2299,7 @@ function AppContent() {
     if (amount < 0.01) {
       return;
     }
-    startSprintRoundIfNeeded(price);
+    startRoundIfNeeded(price);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     const positionSize = amount * leverage;
@@ -2114,7 +2337,7 @@ function AppContent() {
     const inOvertime = isOvertimeRef.current;
     closeAllPositionsAtPrice(price, { showToast: true });
     if (inOvertime && positionsRef.current.length === 0) {
-      finalizeSprintRound();
+      finalizeActiveRound();
     }
   };
   const togglePattern = (id: string) => {
@@ -2310,6 +2533,9 @@ function AppContent() {
   }, [isMarginCallVisible]);
 
   useEffect(() => {
+    if (launchScreen !== "game") {
+      return;
+    }
     const timer = setInterval(() => {
       const candles = candlesRef.current;
       const lastClose = candles.length ? candles[candles.length - 1].close : BASE_PRICE;
@@ -2410,7 +2636,7 @@ function AppContent() {
 
             // Capture stats BEFORE resetRoundState resets them
             const capturedStats = { ...roundStatsRef.current };
-            const capturedRoundEndsAt = roundEndsAtRef.current;
+            const capturedRoundStartedAt = roundStartedAtRef.current;
             const margin = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
 
             resetRoundState();
@@ -2438,7 +2664,7 @@ function AppContent() {
                   biggestLossPercent: capturedStats.biggestLossPercent,
                   wasLiquidated: true,
                   closestToLiquidation: 0,
-                  durationMs: capturedRoundEndsAt ? Date.now() - (capturedRoundEndsAt - ROUND_DURATION_MS) : ROUND_DURATION_MS,
+                  durationMs: capturedRoundStartedAt ? Math.max(0, Date.now() - capturedRoundStartedAt) : ROUND_DURATION_MS,
                   liquidationLeverage: liquidatedLeverage,
                 });
               }
@@ -2455,7 +2681,7 @@ function AppContent() {
     }, tickMs);
 
     return () => clearInterval(timer);
-  }, [tickMs]);
+  }, [launchScreen, tickMs]);
 
   useEffect(() => {
     if (!isWebReady) {
@@ -2524,6 +2750,275 @@ function AppContent() {
           ? styles.profitToastBigValueFlat
           : null;
   const showOvertimeHint = isOvertime && positionCount > 0 && !isRoundResultsVisible && !isMarginCallVisible;
+  const shouldShowInGameBanner = (showStartHint || showSpeedHint || showOvertimeHint) && !isInGameBannerDismissed;
+  const isTrainingMode = gameMode === "training";
+  const isFiveTradesMode = gameMode === "fiveTrades";
+  const modeLabel = isFiveTradesMode ? "5 Trades" : isTrainingMode ? "Training Wheels" : "60s Sprint";
+
+  const launchGameMode = (mode: GameMode) => {
+    setShowStartHint(false);
+    setShowSpeedHint(false);
+    const enableTraining = mode === "training";
+    setShowPatternLines(enableTraining);
+    showPatternLinesRef.current = enableTraining;
+    setGameMode(mode);
+    gameModeRef.current = mode;
+    roundModeRef.current = mode;
+    resetRun();
+    setLaunchScreen("game");
+  };
+
+  const openMenuScreen = () => {
+    setShowStartHint(false);
+    setShowSpeedHint(false);
+    setIsPatternSettingsVisible(false);
+    setIsProFeaturesVisible(false);
+    setIsTopScoreVisible(false);
+    setIsTotalStatsVisible(false);
+    setIsRoundResultsVisible(false);
+    setIsMarginCallVisible(false);
+    resetRun();
+    setLaunchScreen("menu");
+  };
+
+  const handleClaimDailyQuoteBonus = () => {
+    if (!canClaimDailyQuote) {
+      return;
+    }
+    const baseBonus = isPro ? 10 : 5;
+    const pendingProExtra = isPro ? 0 : 5;
+    const didClaim = claimDailyQuoteBonus(todayDayKey, baseBonus, pendingProExtra);
+    if (!didClaim) {
+      return;
+    }
+    const nextBalance = normalizeBalance(stackBalanceRef.current + baseBonus);
+    stackBalanceRef.current = nextBalance;
+    setStackBalance(nextBalance);
+    quoteCashDropProgress.value = 0;
+    quoteCashDropProgress.value = withTiming(1, {
+      duration: 1000,
+      easing: Easing.out(Easing.cubic),
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
+      // Ignore.
+    });
+  };
+
+  const dismissInGameBanner = () => {
+    setIsInGameBannerDismissed(true);
+    setShowStartHint(false);
+    setShowSpeedHint(false);
+  };
+
+  if (launchScreen === "menu") {
+    return (
+      <>
+        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
+          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+          <View style={styles.launchMenu}>
+            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonQuote]} onPress={() => setLaunchScreen("dailyQuote")}>
+              <Text style={styles.launchMenuTitle}>Daily Quote</Text>
+              <Text style={styles.launchMenuSubtitle}>A money quote for today</Text>
+            </Pressable>
+            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonSprint]} onPress={() => launchGameMode("sprint60")}>
+              <Text style={styles.launchMenuTitle}>60 Second Game</Text>
+              <Text style={styles.launchMenuSubtitle}>Current sprint mode</Text>
+            </Pressable>
+            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonFive]} onPress={() => launchGameMode("fiveTrades")}>
+              <Text style={styles.launchMenuTitle}>5 Trades, Your Pace</Text>
+              <Text style={styles.launchMenuSubtitle}>5 closes and the run ends</Text>
+            </Pressable>
+            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonTraining]} onPress={() => launchGameMode("training")}>
+              <Text style={styles.launchMenuTitle}>Training Wheels</Text>
+              <Text style={styles.launchMenuSubtitle}>Pattern guide mode</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.launchMenuButton, styles.launchMenuButtonPro]}
+              onPress={() => {
+                if (isPro) {
+                  return;
+                }
+                setIsProFeaturesVisible(true);
+              }}
+            >
+              <Text style={styles.launchMenuTitle}>{isPro ? "Pro Active" : "Buy Pro"}</Text>
+              <Text style={styles.launchMenuSubtitle}>{isPro ? "Thanks for supporting" : proPrice ? `Unlock all features (${proPrice})` : "Unlock all features"}</Text>
+            </Pressable>
+            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonSettings]} onPress={openSettings}>
+              <Text style={styles.launchMenuTitle}>Settings</Text>
+              <Text style={styles.launchMenuSubtitle}>Stats, leaderboards, and app options</Text>
+            </Pressable>
+          </View>
+          <ProFeaturesModal
+            visible={isProFeaturesVisible}
+            darkMode={darkMode}
+            price={proPrice}
+            onBuy={handleBuyPro}
+            onClose={() => setIsProFeaturesVisible(false)}
+            isPurchasing={isRevenueCatLoading}
+          />
+        </SafeAreaView>
+        {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
+      </>
+    );
+  }
+
+  if (launchScreen === "dailyQuote") {
+    return (
+      <>
+        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
+          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+          <View style={[styles.dailyQuoteScreen, darkMode && styles.dailyQuoteScreenDark]}>
+            <View style={styles.dailyQuoteBackButtonWrap}>
+              <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
+            </View>
+            <View style={[styles.dailyQuotePaper, darkMode && styles.dailyQuotePaperDark]}>
+              <View style={[styles.dailyQuoteTopRule, darkMode && styles.dailyQuoteTopRuleDark]} />
+              <View style={[styles.dailyQuoteTopRuleThin, darkMode && styles.dailyQuoteTopRuleThinDark]} />
+              <Text style={[styles.dailyQuoteMasthead, darkMode && styles.dailyQuoteMastheadDark]}>Daily Money</Text>
+              <View style={styles.dailyQuoteDateLine}>
+                <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
+                <Text style={[styles.dailyQuoteDate, darkMode && styles.dailyQuoteDateDark]}>{dailyMoneyDateLine}</Text>
+                <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
+              </View>
+              <View style={styles.dailyQuoteHeadlineWrap}>
+                <Text style={[styles.dailyQuoteHeadline, darkMode && styles.dailyQuoteHeadlineDark]}>“{dailyMoneyQuote.text}”</Text>
+                <View style={[styles.dailyQuoteHeadlineRule, darkMode && styles.dailyQuoteHeadlineRuleDark]} />
+              </View>
+              <Text style={[styles.dailyQuoteByline, darkMode && styles.dailyQuoteBylineDark]}>By {dailyMoneyQuote.author}</Text>
+            </View>
+            <View style={styles.dailyQuoteMoneyRow}>
+              <View style={styles.dailyQuoteMoneyIconWrap}>
+                <TwemojiBanknote width={30} height={30} />
+                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle1]}>
+                  <TwemojiBanknote width={22} height={22} />
+                </Animated.View>
+                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle2]}>
+                  <TwemojiBanknote width={20} height={20} />
+                </Animated.View>
+                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle3]}>
+                  <TwemojiBanknote width={18} height={18} />
+                </Animated.View>
+              </View>
+              <Text style={[styles.dailyQuoteMoneyText, darkMode && styles.dailyQuoteMoneyTextDark]}>Stack: ${formatMoney(initialStackBalance)}</Text>
+            </View>
+            <UiButton
+              onPress={handleClaimDailyQuoteBonus}
+              disabled={!canClaimDailyQuote}
+              variant="borderedProminent"
+              color="#1a9f7a"
+              style={styles.dailyQuoteLockButton}
+              darkMode={darkMode}
+            >
+              <View style={styles.dailyQuoteLockButtonContent}>
+                <TwemojiLock width={18} height={18} />
+                <Text style={styles.dailyQuoteLockButtonText}>{canClaimDailyQuote ? "Lock In" : "Locked In Today"}</Text>
+              </View>
+            </UiButton>
+            <Text style={[styles.dailyQuoteClaimHint, darkMode && styles.dailyQuoteClaimHintDark]}>
+              {canClaimDailyQuote
+                ? isPro
+                  ? "Pro lock-in gives +$10 once per day."
+                  : "Lock in gives +$5 once per day. Pro gives +$10."
+                : "Come back tomorrow for another lock-in bonus."}
+            </Text>
+            {!isPro && (
+              <View style={styles.dailyQuoteProCounter}>
+                <Text style={[styles.dailyQuoteProCounterText, darkMode && styles.dailyQuoteProCounterTextDark]}>
+                  Mom saved this for you: +${formatMoney(quotePendingProBonus)}
+                </Text>
+              </View>
+            )}
+            {!isPro && (
+              <UiButton
+                title={proPrice ? `Unlock savings with Pro (${proPrice})` : "Unlock savings with Pro"}
+                onPress={() => setIsProFeaturesVisible(true)}
+                variant="borderedProminent"
+                color="#7a2038"
+                style={styles.dailyQuoteBuyProButton}
+                darkMode={darkMode}
+              />
+            )}
+          </View>
+          <ProFeaturesModal
+            visible={isProFeaturesVisible}
+            darkMode={darkMode}
+            price={proPrice}
+            onBuy={handleBuyPro}
+            onClose={() => setIsProFeaturesVisible(false)}
+            isPurchasing={isRevenueCatLoading}
+          />
+        </SafeAreaView>
+        {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
+      </>
+    );
+  }
+
+  if (launchScreen === "settings") {
+    return (
+      <>
+        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
+          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+          <View style={[styles.settingsScreen, darkMode && styles.settingsScreenDark]}>
+            <View style={styles.settingsHeaderRow}>
+              <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
+            </View>
+            <View style={styles.settingsHeaderBlock}>
+              <Text style={[styles.settingsTitle, darkMode && styles.settingsTitleDark]}>Settings</Text>
+              <Text style={[styles.settingsSubtitle, darkMode && styles.settingsSubtitleDark]}>
+                {isPro ? "Pro member settings" : "Manage gameplay, account, and app preferences"}
+              </Text>
+            </View>
+            <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsScrollContent} showsVerticalScrollIndicator={false}>
+              {settingsSections.map((section) => (
+                <View key={section.id} style={styles.settingsSection}>
+                  <Text style={[styles.settingsSectionTitle, darkMode && styles.settingsSectionTitleDark]}>{section.title}</Text>
+                  <View style={[styles.settingsCard, darkMode && styles.settingsCardDark]}>
+                    {section.rows.map((row, index) => (
+                      <Pressable
+                        key={row.id}
+                        onPress={row.onPress}
+                        style={({ pressed }) => [
+                          styles.settingsRow,
+                          darkMode && styles.settingsRowDark,
+                          index < section.rows.length - 1 && styles.settingsRowBorder,
+                          darkMode && index < section.rows.length - 1 && styles.settingsRowBorderDark,
+                          pressed && styles.settingsRowPressed,
+                          darkMode && pressed && styles.settingsRowPressedDark,
+                        ]}
+                      >
+                        <View style={styles.settingsRowLeading}>
+                          <View style={styles.settingsRowIconWrap}>
+                            <row.icon width={22} height={22} />
+                          </View>
+                          <View style={styles.settingsRowTextWrap}>
+                            <Text style={[styles.settingsRowLabel, darkMode && styles.settingsRowLabelDark]}>{row.label}</Text>
+                            <Text style={[styles.settingsRowSubtitle, darkMode && styles.settingsRowSubtitleDark]}>{row.subtitle}</Text>
+                          </View>
+                        </View>
+                        <Text style={[styles.settingsRowChevron, darkMode && styles.settingsRowChevronDark]}>›</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+          <TopScoreModal visible={isTopScoreVisible} darkMode={darkMode} onClose={() => setIsTopScoreVisible(false)} />
+          <TotalStatsModal visible={isTotalStatsVisible} darkMode={darkMode} onClose={() => setIsTotalStatsVisible(false)} />
+          <ProFeaturesModal
+            visible={isProFeaturesVisible}
+            darkMode={darkMode}
+            price={proPrice}
+            onBuy={handleBuyPro}
+            onClose={() => setIsProFeaturesVisible(false)}
+            isPurchasing={isRevenueCatLoading}
+          />
+        </SafeAreaView>
+        {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
+      </>
+    );
+  }
 
   return (
     <>
@@ -2570,10 +3065,11 @@ function AppContent() {
           wagerPercentUsed={wagerPercentUsed}
           wagerAmount={wagerAmount}
           roundSecondsRemaining={roundSecondsRemaining}
+          trainingMode={isTrainingMode}
           darkMode={darkMode}
           chartType={chartType}
           setChartType={applyChartType}
-          openSettings={openSettings}
+          openMenu={openMenuScreen}
           openPatterns={() => {
             if (isPro) {
               setIsPatternSettingsVisible(true);
@@ -2634,6 +3130,13 @@ function AppContent() {
           {typeof roundSecondsRemaining === "number" && (
             <View style={[styles.floatingTimer, darkMode && styles.floatingTimerDark]}>
               <Text style={[styles.floatingTimerText, darkMode && styles.floatingTimerTextDark]}>{Math.max(0, roundSecondsRemaining)}s</Text>
+            </View>
+          )}
+          {isFiveTradesMode && (
+            <View style={[styles.floatingTradeCounter, darkMode && styles.floatingTradeCounterDark]}>
+              <Text style={[styles.floatingTradeCounterText, darkMode && styles.floatingTradeCounterTextDark]}>
+                Trades: {Math.min(roundTradesMade, FIVE_TRADES_TARGET)}/{FIVE_TRADES_TARGET}
+              </Text>
             </View>
           )}
           <View style={styles.floatingFollowContainer}>
@@ -2697,6 +3200,7 @@ function AppContent() {
             onBuy={handleBuy}
             onSell={handleSell}
             disabled={
+              isTrainingMode ||
               isRoundResultsVisible ||
               isMarginCallVisible ||
               (!isOvertime && (isRoundEnded || (typeof roundSecondsRemaining === "number" && roundSecondsRemaining <= 0)))
@@ -2704,17 +3208,27 @@ function AppContent() {
             styles={styles}
           />
 
-          {(showStartHint || showSpeedHint || showOvertimeHint) && (
+          {!isTrainingMode && shouldShowInGameBanner && (
             <Animated.View
               entering={FadeIn.duration(300)}
               exiting={FadeOut.duration(200)}
-              pointerEvents={showSpeedHint || showOvertimeHint ? "none" : showPatternLines ? "auto" : "none"}
+              pointerEvents="box-none"
               style={{ position: "absolute", top: 58, left: 12, right: 12, alignItems: "center", zIndex: 10 }}
             >
               <Pressable
-                disabled={showSpeedHint || showOvertimeHint || !showPatternLines}
+                onPress={dismissInGameBanner}
+                hitSlop={8}
+                style={[styles.inGameBannerCloseButton, darkMode && styles.inGameBannerCloseButtonDark]}
+              >
+                <View style={styles.inGameBannerCloseGlyph}>
+                  <View style={[styles.inGameBannerCloseLine, styles.inGameBannerCloseLineA, darkMode && styles.inGameBannerCloseLineDark]} />
+                  <View style={[styles.inGameBannerCloseLine, styles.inGameBannerCloseLineB, darkMode && styles.inGameBannerCloseLineDark]} />
+                </View>
+              </Pressable>
+              <Pressable
+                disabled={showSpeedHint || showOvertimeHint || !showPatternLines || isTrainingMode}
                 onPress={() => {
-                  if (showPatternLines) {
+                  if (showPatternLines && !isTrainingMode) {
                     setShowPatternLines(false);
                     setStackBalance(initialStackBalance);
                     stackBalanceRef.current = initialStackBalance;
@@ -2761,7 +3275,13 @@ function AppContent() {
                 </View>
                 <View style={[styles.startHintContent, { width: "100%", alignItems: "center" }]}>
                   <Text style={[styles.startHintKicker, darkMode && styles.startHintKickerDark, { textAlign: "center" }]}>
-                    {showOvertimeHint ? "Let it run!" : showSpeedHint ? "Speed updated" : showPatternLines ? "Training Wheels ON" : "Ready to trade?"}
+                    {showOvertimeHint
+                      ? "Let it run!"
+                      : showSpeedHint
+                        ? "Speed updated"
+                        : showPatternLines
+                          ? "Training Wheels ON"
+                          : `Ready for ${modeLabel}?`}
                   </Text>
                   <Text style={[styles.startHintText, darkMode && styles.startHintTextDark, { textAlign: "center" }]}>
                     {showOvertimeHint
@@ -2769,8 +3289,12 @@ function AppContent() {
                       : showSpeedHint
                         ? speedHintText
                         : showPatternLines
-                          ? "Tap to turn off & start playing"
-                          : "Hit BUY to start your 60s sprint!"}
+                          ? isTrainingMode
+                            ? "Training mode active"
+                            : "Tap to turn off & start playing"
+                          : isFiveTradesMode
+                            ? "Hit BUY to start your 5-trade run!"
+                            : "Hit BUY to start your 60s sprint!"}
                   </Text>
                 </View>
               </Pressable>
@@ -2780,6 +3304,18 @@ function AppContent() {
                   <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600", textAlign: "center" }}>Forming: {currentPatternLabel}</Text>
                 </View>
               )}
+            </Animated.View>
+          )}
+          {isTrainingMode && showPatternLines && currentPatternLabel && (
+            <Animated.View
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              pointerEvents="none"
+              style={{ position: "absolute", top: 58, left: 12, right: 12, alignItems: "center", zIndex: 10 }}
+            >
+              <View style={styles.trainingFormingTag}>
+                <Text style={styles.trainingFormingTagText}>Forming: {currentPatternLabel}</Text>
+              </View>
             </Animated.View>
           )}
         </View>
@@ -2803,6 +3339,9 @@ function AppContent() {
           togglePattern={togglePattern}
           showPatternLines={showPatternLines}
           onTogglePatternLines={() => {
+            if (isTrainingMode) {
+              return;
+            }
             setShowPatternLines((prev) => {
               // If turning OFF training wheels, reset the money stack
               if (prev === true) {
@@ -2814,20 +3353,6 @@ function AppContent() {
           }}
           onClose={() => setIsPatternSettingsVisible(false)}
         />
-        <SettingsMenuModal
-          visible={isSettingsMenuVisible}
-          darkMode={darkMode}
-          options={settingsMenuOptions.map((opt) => ({
-            ...opt,
-            onPress: () => {
-              setIsSettingsMenuVisible(false);
-              setTimeout(() => opt.onPress(), 0);
-            },
-          }))}
-          onClose={() => setIsSettingsMenuVisible(false)}
-        />
-        <TopScoreModal visible={isTopScoreVisible} darkMode={darkMode} onClose={() => setIsTopScoreVisible(false)} />
-        <TotalStatsModal visible={isTotalStatsVisible} darkMode={darkMode} onClose={() => setIsTotalStatsVisible(false)} />
         <ProFeaturesModal
           visible={isProFeaturesVisible}
           darkMode={darkMode}
@@ -2876,6 +3401,15 @@ const styles = StyleSheet.create({
     borderBottomColor: "#1f2329",
     backgroundColor: "#0d0f12",
   },
+  stackBarTraining: {
+    borderBottomColor: "#148664",
+    backgroundColor: "#1a9f7a",
+  },
+  stackLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   stackLabel: {
     fontSize: 12,
     color: "#666666",
@@ -2890,6 +3424,19 @@ const styles = StyleSheet.create({
   },
   stackValueDark: {
     color: "#f5f5f5",
+  },
+  stackTrainingWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  stackTrainingText: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#ffffff",
+  },
+  stackTrainingTextDark: {
+    color: "#ffffff",
   },
   stackBarRight: {
     flexDirection: "row",
@@ -2924,6 +3471,21 @@ const styles = StyleSheet.create({
   },
   settingsButtonDark: {
     backgroundColor: "transparent",
+  },
+  menuBurgerGlyph: {
+    width: 14,
+    height: 12,
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  menuBurgerLine: {
+    width: 14,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#222222",
+  },
+  menuBurgerLineDark: {
+    backgroundColor: "#e6e6e6",
   },
   chartTypeScroller: {
     maxWidth: 140,
@@ -3017,6 +3579,401 @@ const styles = StyleSheet.create({
   floatingTimerTextDark: {
     backgroundColor: "rgba(13, 15, 18, 0.85)",
   },
+  floatingTradeCounter: {
+    position: "absolute",
+    top: 54,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 10,
+  },
+  floatingTradeCounterDark: {},
+  floatingTradeCounterText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#1a9f7a",
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  floatingTradeCounterTextDark: {
+    backgroundColor: "rgba(13, 15, 18, 0.85)",
+    color: "#8fe3c7",
+  },
+  launchMenu: {
+    flex: 1,
+    width: "100%",
+  },
+  launchMenuButton: {
+    flex: 1,
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.25)",
+  },
+  launchMenuButtonQuote: {
+    backgroundColor: "#0f5132",
+    borderTopWidth: 0,
+  },
+  launchMenuButtonSprint: {
+    backgroundColor: "#1a9f7a",
+  },
+  launchMenuButtonFive: {
+    backgroundColor: "#f5a623",
+  },
+  launchMenuButtonTraining: {
+    backgroundColor: "#2e4057",
+  },
+  launchMenuButtonPro: {
+    backgroundColor: "#7a2038",
+  },
+  launchMenuButtonSettings: {
+    backgroundColor: "#374151",
+  },
+  launchMenuTitle: {
+    fontSize: 30,
+    fontWeight: "800",
+    color: "#ffffff",
+    textAlign: "center",
+  },
+  launchMenuSubtitle: {
+    marginTop: 10,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.9)",
+    textAlign: "center",
+  },
+  settingsScreen: {
+    flex: 1,
+    backgroundColor: "#eef3f8",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  settingsScreenDark: {
+    backgroundColor: "#13181d",
+  },
+  settingsHeaderRow: {
+    alignItems: "flex-start",
+    marginBottom: 10,
+  },
+  settingsHeaderBlock: {
+    marginBottom: 14,
+    paddingHorizontal: 4,
+  },
+  settingsTitle: {
+    fontSize: 34,
+    fontWeight: "900",
+    color: "#0f1720",
+    letterSpacing: 0.2,
+  },
+  settingsTitleDark: {
+    color: "#f3f7fb",
+  },
+  settingsSubtitle: {
+    marginTop: 6,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#4f6378",
+  },
+  settingsSubtitleDark: {
+    color: "#a5b6c7",
+  },
+  settingsScroll: {
+    flex: 1,
+  },
+  settingsScrollContent: {
+    paddingBottom: 28,
+  },
+  settingsSection: {
+    marginBottom: 16,
+  },
+  settingsSectionTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#6d7f92",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  settingsSectionTitleDark: {
+    color: "#8ea0b3",
+  },
+  settingsCard: {
+    borderRadius: 14,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#d9e3ed",
+    overflow: "hidden",
+  },
+  settingsCardDark: {
+    backgroundColor: "#1b242d",
+    borderColor: "#2a3642",
+  },
+  settingsRow: {
+    minHeight: 72,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  settingsRowDark: {
+    backgroundColor: "#1b242d",
+  },
+  settingsRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5edf4",
+  },
+  settingsRowBorderDark: {
+    borderBottomColor: "#2a3642",
+  },
+  settingsRowPressed: {
+    backgroundColor: "#f2f7fc",
+  },
+  settingsRowPressedDark: {
+    backgroundColor: "#24313d",
+  },
+  settingsRowLeading: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  settingsRowIconWrap: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  settingsRowTextWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  settingsRowLabel: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#132031",
+  },
+  settingsRowLabelDark: {
+    color: "#eef5fd",
+  },
+  settingsRowSubtitle: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#5f7388",
+  },
+  settingsRowSubtitleDark: {
+    color: "#9eb0c3",
+  },
+  settingsRowChevron: {
+    fontSize: 24,
+    fontWeight: "400",
+    color: "#7e92a7",
+    lineHeight: 24,
+  },
+  settingsRowChevronDark: {
+    color: "#9db2c7",
+  },
+  dailyQuoteScreen: {
+    flex: 1,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    backgroundColor: "#f5f0e1",
+  },
+  dailyQuoteBackButtonWrap: {
+    position: "absolute",
+    top: 8,
+    left: 0,
+    right: 0,
+    alignItems: "flex-start",
+    paddingHorizontal: 8,
+    zIndex: 5,
+  },
+  dailyQuoteScreenDark: {
+    backgroundColor: "#151311",
+  },
+  dailyQuotePaper: {
+    width: "100%",
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 16,
+    backgroundColor: "#f5f0e1",
+    borderWidth: 1,
+    borderColor: "#ddd4c0",
+  },
+  dailyQuotePaperDark: {
+    backgroundColor: "#201d18",
+    borderColor: "#4a4438",
+  },
+  dailyQuoteTopRule: {
+    height: 4,
+    backgroundColor: "#1a1a1a",
+    marginBottom: 2,
+  },
+  dailyQuoteTopRuleDark: {
+    backgroundColor: "#e4d9c2",
+  },
+  dailyQuoteTopRuleThin: {
+    height: 1,
+    backgroundColor: "#1a1a1a",
+    marginBottom: 14,
+  },
+  dailyQuoteTopRuleThinDark: {
+    backgroundColor: "#e4d9c2",
+  },
+  dailyQuoteMasthead: {
+    fontSize: 34,
+    letterSpacing: 2,
+    fontWeight: "900",
+    fontFamily: "Georgia",
+    color: "#1a1a1a",
+    textAlign: "center",
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  dailyQuoteMastheadDark: {
+    color: "#f2e6ce",
+  },
+  dailyQuoteDateLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+    gap: 10,
+  },
+  dailyQuoteDateDivider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#1a1a1a",
+  },
+  dailyQuoteDateDividerDark: {
+    backgroundColor: "#d6c8ac",
+  },
+  dailyQuoteDate: {
+    fontSize: 10,
+    fontWeight: "600",
+    letterSpacing: 1,
+    color: "#555555",
+  },
+  dailyQuoteDateDark: {
+    color: "#c7b899",
+  },
+  dailyQuoteHeadlineWrap: {
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  dailyQuoteHeadline: {
+    fontSize: 36,
+    lineHeight: 44,
+    fontWeight: "600",
+    fontFamily: "Georgia",
+    color: "#1f1f1f",
+    textAlign: "center",
+  },
+  dailyQuoteHeadlineDark: {
+    color: "#f2e7d2",
+  },
+  dailyQuoteHeadlineRule: {
+    width: 92,
+    height: 3,
+    backgroundColor: "#1a1a1a",
+    marginTop: 12,
+  },
+  dailyQuoteHeadlineRuleDark: {
+    backgroundColor: "#d6c8ac",
+  },
+  dailyQuoteByline: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    color: "#666666",
+    textAlign: "center",
+    textTransform: "uppercase",
+  },
+  dailyQuoteBylineDark: {
+    color: "#c7b899",
+  },
+  dailyQuoteMoneyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  dailyQuoteMoneyIconWrap: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dailyQuoteDropCash: {
+    position: "absolute",
+    top: 7,
+    left: 7,
+    right: 7,
+    bottom: 7,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dailyQuoteMoneyText: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#0f5132",
+  },
+  dailyQuoteMoneyTextDark: {
+    color: "#b9ead7",
+  },
+  dailyQuoteLockButton: {
+    minWidth: 240,
+  },
+  dailyQuoteLockButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  dailyQuoteLockButtonText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  dailyQuoteClaimHint: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#356d57",
+    textAlign: "center",
+  },
+  dailyQuoteClaimHintDark: {
+    color: "#9bcbb9",
+  },
+  dailyQuoteBuyProButton: {
+    minWidth: 240,
+  },
+  dailyQuoteProCounter: {
+    marginTop: 4,
+    marginBottom: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: "rgba(15,81,50,0.12)",
+    alignSelf: "center",
+  },
+  dailyQuoteProCounterText: {
+    color: "#0f5132",
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  dailyQuoteProCounterTextDark: {
+    color: "#b9ead7",
+  },
   topSafeArea: {
     position: "absolute",
     top: 0,
@@ -3060,6 +4017,56 @@ const styles = StyleSheet.create({
   },
   startHintContainerDark: {
     backgroundColor: "#1a9f7a",
+  },
+  inGameBannerCloseButton: {
+    position: "absolute",
+    top: 12,
+    right: 20,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.18)",
+    zIndex: 12,
+  },
+  inGameBannerCloseButtonDark: {
+    backgroundColor: "rgba(0,0,0,0.28)",
+  },
+  inGameBannerCloseGlyph: {
+    width: 14,
+    height: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inGameBannerCloseLine: {
+    position: "absolute",
+    width: 14,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#ffffff",
+  },
+  inGameBannerCloseLineA: {
+    transform: [{ rotate: "45deg" }],
+  },
+  inGameBannerCloseLineB: {
+    transform: [{ rotate: "-45deg" }],
+  },
+  inGameBannerCloseLineDark: {
+    backgroundColor: "#ffffff",
+  },
+  trainingFormingTag: {
+    marginTop: 8,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  trainingFormingTagText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
   },
   overtimeHintContainer: {
     backgroundColor: "#f5a623",
