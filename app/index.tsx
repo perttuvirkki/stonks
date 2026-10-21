@@ -1,9 +1,10 @@
 import { memo, type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
 import Animated, { Easing, FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import Constants from "expo-constants";
+import { Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as SplashScreen from "expo-splash-screen";
 import * as StoreReview from "expo-store-review";
@@ -3453,8 +3454,15 @@ function AppContent() {
 
   return (
     <View style={[styles.container, { backgroundColor: screenBackground }]}>
-      <StatusBar barStyle={useLightStatusBar ? "light-content" : "dark-content"} animated />
-      <Animated.View key={launchScreen} entering={transition.entering} exiting={transition.exiting} style={[StyleSheet.absoluteFill, { backgroundColor: screenBackground }]}>
+      {/* Status bar style goes through the screen's view controller: iOS 27 ignores the app-wide setter RN's StatusBar uses. */}
+      <Stack.Screen options={{ statusBarStyle: useLightStatusBar ? "light" : "dark", statusBarAnimation: "fade" }} />
+      {/* Sub-screens and the game sit above the menu, so a screen sliding back out stays visible over the menu fading in. */}
+      <Animated.View
+        key={launchScreen}
+        entering={transition.entering}
+        exiting={transition.exiting}
+        style={[StyleSheet.absoluteFill, { backgroundColor: screenBackground, zIndex: launchScreen === "menu" ? 0 : 1 }]}
+      >
         {screen}
       </Animated.View>
       {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}

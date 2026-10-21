@@ -39,6 +39,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     bundleIdentifier: "com.ludussuper.stonks",
     icon: APP_ICON,
+    infoPlist: {
+      // Per-screen status bar styles (react-native-screens); the app-wide UIApplication setter is a no-op on iOS 27.
+      UIViewControllerBasedStatusBarAppearance: true,
+    },
   },
   android: {
     icon: APP_ICON,
