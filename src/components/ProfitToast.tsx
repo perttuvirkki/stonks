@@ -5,10 +5,6 @@ import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reani
 import { RocketBurst } from "./RocketBurst";
 import { MoneyPrinterBurst } from "./MoneyPrinterBurst";
 
-// The toast springs in with a little overshoot; it is drawn this much taller than the screen top
-// (and shifted up by the same amount) so the bounce never opens a gap above it.
-const OVERSHOOT_PAD = 24;
-
 export type ProfitToastProps = {
   visible: boolean;
   darkMode: boolean;
@@ -45,7 +41,7 @@ export function ProfitToast({
   }
 
   return (
-    <View pointerEvents="none" style={[styles.topSafeArea, { top: -OVERSHOOT_PAD }]}>
+    <View pointerEvents="none" style={styles.topSafeArea}>
       <Animated.View
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
@@ -55,7 +51,6 @@ export function ProfitToast({
         }}
         style={[styles.profitToast, darkMode && styles.profitToastDark, localStyles.toastClip, animatedStyle]}
       >
-        <View style={{ height: OVERSHOOT_PAD }} />
         {backgroundAccessory}
 
         {!!moneyPrinterTrigger && layout.width > 0 && layout.height > 0 ? (

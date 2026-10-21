@@ -2112,8 +2112,10 @@ function AppContent() {
     if (toastHideTimeoutRef.current) {
       clearTimeout(toastHideTimeoutRef.current);
     }
-    // Drop in with a little bounce; the toast is taller than its offset, so the overshoot never shows a gap.
-    toastTranslateY.value = withSpring(0, { damping: 15, stiffness: 190, mass: 0.9 });
+    toastTranslateY.value = withTiming(0, {
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+    });
     toastTimeoutRef.current = setTimeout(() => {
       toastTranslateY.value = withTiming(TOP_SHEET_OFFSET, {
         duration: 220,
@@ -3055,7 +3057,7 @@ function AppContent() {
           </View>
           <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsScrollContent} showsVerticalScrollIndicator={false}>
             {settingsSections.map((section, sectionIndex) => (
-              <Animated.View key={section.id} entering={FadeInDown.delay(120 + sectionIndex * 70).springify().damping(18)} style={styles.settingsSection}>
+              <Animated.View key={section.id} entering={FadeInDown.delay(120 + sectionIndex * 70).duration(380)} style={styles.settingsSection}>
                 <Text style={[styles.settingsSectionTitle, darkMode && styles.settingsSectionTitleDark]}>{section.title}</Text>
                 <View style={[styles.settingsCard, darkMode && styles.settingsCardDark]}>
                   {section.rows.map((row, index) => (

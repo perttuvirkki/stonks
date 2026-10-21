@@ -14,26 +14,22 @@ export type UiPickerProps = {
   darkMode?: boolean;
 };
 
-const SLIDE_SPRING = { damping: 20, stiffness: 260, mass: 0.8 };
+const SLIDE_SPRING = { damping: 30, stiffness: 300, mass: 0.8 };
 
 export const UiPicker = memo(({ options, selectedIndex, onSelect, variant = "segmented", color, style, darkMode }: UiPickerProps) => {
   const [width, setWidth] = useState(0);
   const segmentWidth = options.length > 0 ? width / options.length : 0;
   const indicatorX = useSharedValue(0);
-  const indicatorScale = useSharedValue(1);
 
   useEffect(() => {
     if (selectedIndex == null || segmentWidth <= 0) {
       return;
     }
     indicatorX.value = withSpring(selectedIndex * segmentWidth, SLIDE_SPRING);
-    // Brief squash as it lands on the new option.
-    indicatorScale.value = 0.9;
-    indicatorScale.value = withSpring(1, { damping: 9, stiffness: 300 });
-  }, [indicatorScale, indicatorX, segmentWidth, selectedIndex]);
+  }, [indicatorX, segmentWidth, selectedIndex]);
 
   const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: indicatorX.value }, { scaleY: indicatorScale.value }],
+    transform: [{ translateX: indicatorX.value }],
   }));
 
   if (variant !== "segmented") {

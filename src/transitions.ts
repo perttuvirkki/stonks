@@ -35,9 +35,9 @@ export const gameExit = new Keyframe({
   100: { opacity: 0, transform: [{ scale: 1.04 }], easing: EASE_IN },
 }).duration(220);
 
-/** Small overshoot pop for counters and badges that remount when their value changes. */
+/** Subtle pop for counters and badges that remount when their value changes. */
 export const popIn = new Keyframe({
-  0: { opacity: 0.4, transform: [{ scale: 0.6 }] },
-  55: { opacity: 1, transform: [{ scale: 1.15 }], easing: EASE_OUT },
+  0: { opacity: 0.5, transform: [{ scale: 0.85 }] },
+  60: { opacity: 1, transform: [{ scale: 1.04 }], easing: EASE_OUT },
   100: { opacity: 1, transform: [{ scale: 1 }] },
-}).duration(320);
+}).duration(260);

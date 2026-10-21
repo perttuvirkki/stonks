@@ -35,7 +35,7 @@ export const UiButton = memo(({ title, systemImage, onPress, disabled, variant, 
   const displayTitle = title ?? (systemImage === "gearshape" ? "⚙︎" : "");
 
   // Big trade buttons squish less so they still feel solid.
-  const pressedScale = size === "large" ? 0.97 : 0.93;
+  const pressedScale = size === "large" ? 0.98 : 0.95;
 
   return (
     <PressableScale

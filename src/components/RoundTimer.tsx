@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import Animated, { useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming } from "react-native-reanimated";
 import { heavyHaptic, selectHaptic } from "../haptics";
 
 const HURRY_SECONDS = 10;
@@ -24,7 +24,7 @@ export const RoundTimer = memo(({ seconds, darkMode }: RoundTimerProps) => {
     if (clamped >= previous || clamped > HURRY_SECONDS) {
       return;
     }
-    scale.value = withSequence(withTiming(clamped === 0 ? 1.3 : 1.16, { duration: 90 }), withSpring(1, { damping: 7, stiffness: 240 }));
+    scale.value = withSequence(withTiming(clamped === 0 ? 1.15 : 1.08, { duration: 90 }), withTiming(1, { duration: 220 }));
     if (clamped === 0) {
       heavyHaptic();
     } else if (clamped <= TICK_HAPTIC_SECONDS) {

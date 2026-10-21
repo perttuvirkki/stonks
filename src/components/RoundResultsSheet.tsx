@@ -20,17 +20,14 @@ const COUNT_DURATION_MS = 900;
 const STAT_STAGGER_MS = 70;
 
 const emojiEnter = new Keyframe({
-  0: { opacity: 0, transform: [{ scale: 0.3 }, { rotate: "-20deg" }] },
-  60: { opacity: 1, transform: [{ scale: 1.15 }, { rotate: "6deg" }], easing: Easing.out(Easing.cubic) },
-  100: { opacity: 1, transform: [{ scale: 1 }, { rotate: "0deg" }], easing: Easing.inOut(Easing.quad) },
+  0: { opacity: 0, transform: [{ scale: 0.7 }, { rotate: "-6deg" }] },
+  100: { opacity: 1, transform: [{ scale: 1 }, { rotate: "0deg" }], easing: Easing.out(Easing.cubic) },
 })
-  .duration(620)
+  .duration(520)
   .delay(450);
 
 const statEnter = (index: number) =>
-  FadeInDown.delay(COUNT_DELAY_MS + 250 + index * STAT_STAGGER_MS)
-    .springify()
-    .damping(18);
+  FadeInDown.delay(COUNT_DELAY_MS + 250 + index * STAT_STAGGER_MS).duration(360);
 
 export type RoundStats = {
   tradesMade: number;

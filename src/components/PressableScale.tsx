@@ -5,8 +5,9 @@ import { tapHaptic } from "../haptics";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-const PRESS_SPRING = { damping: 18, stiffness: 420, mass: 0.6 };
-const RELEASE_SPRING = { damping: 11, stiffness: 260, mass: 0.7 };
+// Close to critically damped: a firm squish and a clean settle, no wobble.
+const PRESS_SPRING = { damping: 35, stiffness: 500, mass: 0.6 };
+const RELEASE_SPRING = { damping: 28, stiffness: 320, mass: 0.6 };
 
 export type PressableScaleProps = Omit<PressableProps, "style" | "children"> & {
   style?: StyleProp<ViewStyle>;
@@ -17,8 +18,8 @@ export type PressableScaleProps = Omit<PressableProps, "style" | "children"> & {
   haptic?: boolean;
 };
 
-/** Pressable that squishes on touch and springs back with a little overshoot. */
-export const PressableScale = memo(({ style, children, pressedScale = 0.96, haptic = true, onPressIn, onPressOut, onPress, disabled, ...rest }: PressableScaleProps) => {
+/** Pressable that squishes slightly on touch and settles back. */
+export const PressableScale = memo(({ style, children, pressedScale = 0.97, haptic = true, onPressIn, onPressOut, onPress, disabled, ...rest }: PressableScaleProps) => {
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({

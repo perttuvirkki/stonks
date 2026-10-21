@@ -51,9 +51,8 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 const enter = (index: number) =>
   FadeInDown.delay(60 + index * 55)
-    .springify()
-    .damping(17)
-    .stiffness(170);
+    .duration(420)
+    .easing(Easing.out(Easing.cubic));
 
 /** Draws the header sparkline in, then keeps a soft glow pulse on the last point. */
 const Sparkline = memo(({ color }: { color: string }) => {
@@ -107,7 +106,7 @@ const Sparkline = memo(({ color }: { color: string }) => {
 Sparkline.displayName = "Sparkline";
 
 /** Slow idle bob for the emoji on the cards, so the menu feels alive without being busy. */
-const Floating = memo(({ children, delay = 0, distance = 6 }: { children: React.ReactNode; delay?: number; distance?: number }) => {
+const Floating = memo(({ children, delay = 0, distance = 4 }: { children: React.ReactNode; delay?: number; distance?: number }) => {
   const t = useSharedValue(0);
 
   useEffect(() => {
@@ -115,7 +114,7 @@ const Floating = memo(({ children, delay = 0, distance = 6 }: { children: React.
   }, [delay, t]);
 
   const style = useAnimatedStyle(() => ({
-    transform: [{ translateY: -distance * t.value }, { rotate: `${-4 + t.value * 8}deg` }],
+    transform: [{ translateY: -distance * t.value }, { rotate: `${-2 + t.value * 4}deg` }],
   }));
 
   return <Animated.View style={style}>{children}</Animated.View>;
@@ -132,7 +131,7 @@ const ClaimBadge = memo(({ label }: { label: string }) => {
   }, [pulse]);
 
   const style = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + pulse.value * 0.06 }],
+    transform: [{ scale: 1 + pulse.value * 0.04 }],
   }));
 
   return (
@@ -181,7 +180,7 @@ export const MainMenu = memo(
           </View>
           <PressableScale
             onPress={onOpenSettings}
-            pressedScale={0.88}
+            pressedScale={0.92}
             hitSlop={8}
             accessibilityLabel="Settings"
             style={[styles.gearButton, { backgroundColor: surface, borderColor: border }]}
@@ -233,7 +232,7 @@ export const MainMenu = memo(
         </Animated.View>
 
         <Animated.View entering={enter(2)}>
-          <PressableScale onPress={() => onPlay("sprint60")} pressedScale={0.97} style={[styles.heroShell, styles.shadow]}>
+          <PressableScale onPress={() => onPlay("sprint60")} pressedScale={0.98} style={[styles.heroShell, styles.shadow]}>
             <View style={styles.heroCard}>
             <View style={styles.heroGlow} />
             <View style={styles.heroText}>
@@ -245,7 +244,7 @@ export const MainMenu = memo(
               </View>
             </View>
             <View style={styles.heroEmoji}>
-              <Floating distance={8}>
+              <Floating distance={5}>
                 <TwemojiRocket width={96} height={96} />
               </Floating>
             </View>
@@ -293,7 +292,7 @@ export const MainMenu = memo(
         {!isPro && (
           <Animated.View entering={enter(5)}>
             <PressableScale onPress={onOpenPro} style={[styles.rowCard, styles.proCard]}>
-              <Floating delay={500} distance={4}>
+              <Floating delay={500} distance={3}>
                 <TwemojiGem width={30} height={30} />
               </Floating>
               <View style={styles.rowText}>

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Text, type StyleProp, type TextStyle } from "react-native";
-import Animated, { interpolateColor, useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { interpolateColor, useAnimatedStyle, useSharedValue, withSequence, withTiming } from "react-native-reanimated";
 
 export type AnimatedNumberProps = {
   value: number;
@@ -60,7 +60,7 @@ export const AnimatedNumber = memo(
 
       if (flash) {
         direction.value = value > from ? 1 : -1;
-        scale.value = withSequence(withTiming(1.12, { duration: 110 }), withSpring(1, { damping: 8, stiffness: 220 }));
+        scale.value = withSequence(withTiming(1.05, { duration: 110 }), withTiming(1, { duration: 220 }));
         tint.value = withSequence(withTiming(1, { duration: 120 }), withTiming(1, { duration: duration }), withTiming(0, { duration: 500 }));
       }
 
