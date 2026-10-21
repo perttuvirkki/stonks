@@ -201,7 +201,7 @@ AnimatedSplash.displayName = "AnimatedSplash";
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#ffffff",
     zIndex: 100,
   },

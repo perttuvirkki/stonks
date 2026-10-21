@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { ExpoConfig, ConfigContext } from "expo/config";
 
 const APP_ICON = "./assets/appicon-ios.icon/Assets/AppIcon~ios-marketing.png";
@@ -11,6 +10,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: "stonks",
   plugins: [
     "expo-router",
+    [
+      "expo-splash-screen",
+      {
+        image: "./assets/splash-custom.png",
+        resizeMode: "contain",
+        backgroundColor: "#ffffff",
+        // Matches what the legacy top-level `splash` field produced before SDK 55.
+        imageWidth: 200,
+        enableFullScreenImage_legacy: true,
+      },
+    ],
     [
       "expo-stores-games-services",
       {
@@ -25,12 +35,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: "portrait",
   icon: APP_ICON,
   userInterfaceStyle: "light",
-  newArchEnabled: true,
-  splash: {
-    image: "./assets/splash-custom.png",
-    resizeMode: "contain",
-    backgroundColor: "#ffffff",
-  },
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.ludussuper.stonks",
@@ -42,7 +46,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       foregroundImage: APP_ICON,
       backgroundColor: "#ffffff",
     },
-    edgeToEdgeEnabled: true,
     package: "com.ludussuper.stonks",
     versionCode: 5,
   },

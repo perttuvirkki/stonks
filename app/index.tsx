@@ -1,6 +1,6 @@
 import { memo, type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
 import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import Constants from "expo-constants";
@@ -179,6 +179,8 @@ const CHART_HTML = [
 
 const CHART_SOURCE = { html: CHART_HTML };
 const WEBVIEW_ORIGIN_WHITELIST = ["*"];
+// react-native-webview 14 defaults its props generic to `undefined`, which collapses the props type to `never`.
+const ChartWebView = WebView<object>;
 
 const INJECTED_CHART_SCRIPT = `
 	  (function () {
@@ -1355,7 +1357,7 @@ function AppContent() {
   const releasePendingProQuoteBonus = useGameStore((state) => state.releasePendingProQuoteBonus);
   const reviewPromptShown = useGameStore((state) => state.reviewPromptShown);
   const setReviewPromptShown = useGameStore((state) => state.setReviewPromptShown);
-  const webViewRef = useRef<WebView>(null);
+  const webViewRef = useRef<WebView<object>>(null);
   const candleIndexRef = useRef(0);
   const baseTimeRef = useRef<number | null>(null);
   const [isWebReady, setIsWebReady] = useState(false);
@@ -2518,6 +2520,7 @@ function AppContent() {
         clearTimeout(speedHintTimeoutRef.current);
         speedHintTimeoutRef.current = null;
       }
+      clearRoundTimers();
     };
   }, []);
 
@@ -3081,7 +3084,7 @@ function AppContent() {
           styles={styles}
         />
         <View style={styles.chartWrapper}>
-          <WebView
+          <ChartWebView
             ref={webViewRef}
             originWhitelist={WEBVIEW_ORIGIN_WHITELIST}
             source={CHART_SOURCE}
@@ -4076,7 +4079,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   overtimeBurstLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1,
   },
   startHintKicker: {

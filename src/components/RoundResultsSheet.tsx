@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Dimensions, Image, Platform, Share, StyleSheet, Text, TextInput, View, Alert, Modal, TouchableOpacity, TouchableWithoutFeedback, Keyboard } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
-import ViewShot from "react-native-view-shot";
+import ViewShot, { type ViewShotRef } from "react-native-view-shot";
 import TwemojiRocket from "../../assets/twemoji/1f680.svg";
 import TwemojiCoin from "../../assets/twemoji/1fa99.svg";
 import TwemojiBanknote from "../../assets/twemoji/1f4b5.svg";
@@ -46,11 +46,11 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
 
   const [rendered, setRendered] = useState(visible);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const viewShotRef = useRef<ViewShot>(null);
+  const viewShotRef = useRef<ViewShotRef>(null);
 
   const handleShare = useCallback(async () => {
     try {
-      const uri = await viewShotRef.current?.capture?.();
+      const uri = await viewShotRef.current?.capture();
       if (uri) {
         await Share.share({
           url: uri,
@@ -595,7 +595,7 @@ const styles = StyleSheet.create({
   },
 
   backgroundAccessories: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: "hidden",
   },
   bgItem: {

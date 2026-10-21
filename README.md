@@ -8,9 +8,9 @@ The game focuses on short, high-volatility rounds with multiple modes, synthetic
 
 ## Tech Stack
 
-- Expo SDK 54
-- React Native 0.81 + React 19
+- Expo SDK 58
+- React Native 0.88 + React 19.3
 - TypeScript
 - `expo-router`
-- `lightweight-charts` (inside a `react-native-webview`)
+- `lightweight-charts` (inside a `react-native-webview`; bundled into `src/chartScript.ts` via `npm run generate:chart`)
 - Zustand for local state persistence

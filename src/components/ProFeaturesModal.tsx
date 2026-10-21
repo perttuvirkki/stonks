@@ -164,7 +164,7 @@ const FeatureRow = ({ icon, title, subtitle, darkMode, bg, color, subColor }: an
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 60,
   },
   content: {

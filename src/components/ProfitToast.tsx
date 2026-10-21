@@ -78,7 +78,7 @@ const localStyles = StyleSheet.create({
     position: "relative",
   },
   rocketLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 2,
   },
 });

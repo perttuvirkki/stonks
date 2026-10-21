@@ -72,13 +72,12 @@ function pickProPackage(offerings: PurchasesOfferings): PurchasesPackage | null 
 
 class RevenueCatService {
   private initialized = false;
-  private customerInfoListener: ((info: CustomerInfo) => void) | null = null;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
     try {
-      Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+      Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.WARN);
 
       if (Platform.OS === "ios" || Platform.OS === "android") {
         const apiKey = getRevenueCatApiKey();
@@ -157,12 +156,9 @@ class RevenueCatService {
   }
 
   addCustomerInfoUpdateListener(listener: (info: CustomerInfo) => void): () => void {
-    this.customerInfoListener = listener;
     Purchases.addCustomerInfoUpdateListener(listener);
     return () => {
-      if (!this.customerInfoListener) return;
-      Purchases.removeCustomerInfoUpdateListener(this.customerInfoListener);
-      this.customerInfoListener = null;
+      Purchases.removeCustomerInfoUpdateListener(listener);
     };
   }
 }

@@ -228,7 +228,7 @@ TotalStatsModal.displayName = "TotalStatsModal";
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 50,
   },
   content: {
