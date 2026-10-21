@@ -41,8 +41,8 @@ import TwemojiSkull from "../assets/twemoji/1f480.svg";
 import type { ButtonVariant } from "../src/components/UiButton";
 import { UiButton } from "../src/components/UiButton";
 import { allPatterns, choosePattern } from "../src/patterns";
-import type { Candle } from "../src/types";
-import { createCandle, createTargetRunout } from "../src/utils";
+import type { Candle, PatternLineKind } from "../src/types";
+import { createCandle } from "../src/utils";
 import * as GameCenter from "../src/services/GameCenterService";
 
 type ChartBar = {
@@ -55,11 +55,12 @@ type ChartBar = {
 
 type PatternLineIndex = {
   id: string;
-  kind: "support" | "resistance";
-  startIndex: number;
+  kind: PatternLineKind;
+  /** Anchor points in absolute candle indices. */
+  points: { index: number; price: number }[];
+  revealIndex: number;
+  /** Last candle index the line extends to. */
   endIndex: number;
-  startPrice: number;
-  endPrice: number;
 };
 
 type Position = {
@@ -128,7 +129,7 @@ const DAILY_MONEY_QUOTES: DailyMoneyQuote[] = [
 type ChartSpeedMs = 100 | 125 | 150 | 175 | 200;
 
 // Estimate used for UI messaging (pattern length + typical resolve/spawn overhead).
-const ESTIMATED_CANDLES_PER_PATTERN_CYCLE = 117;
+const ESTIMATED_CANDLES_PER_PATTERN_CYCLE = 80;
 const SPEED_HINT_DURATION_MS = 1600;
 
 const getDailyMoneyQuote = () => {
@@ -865,23 +866,33 @@ const INJECTED_CHART_SCRIPT = `
         followToLastBar();
       }
     }
-    function ensureLineSeries(id, kind) {
+    var LINE_STYLES = {
+      support: { color: "#1a9f7a", lineWidth: 2, lineStyle: 0 },
+      resistance: { color: "#d94b4b", lineWidth: 2, lineStyle: 0 },
+      neckline: { color: "#3b82f6", lineWidth: 2, lineStyle: 0 },
+      target: { color: "#f5a524", lineWidth: 2, lineStyle: 2, lastValueVisible: true, title: "Target" },
+      guide: { color: "#9aa0a6", lineWidth: 1, lineStyle: 1 },
+    };
+    function ensureLineSeries(key, kind) {
       if (!state.chart) {
         return null;
       }
       if (!state.lineSeries) {
         state.lineSeries = {};
       }
-      if (state.lineSeries[id]) {
-        return state.lineSeries[id];
+      if (state.lineSeries[key]) {
+        return state.lineSeries[key];
       }
-      var color = kind === "resistance" ? "#d94b4b" : "#1a9f7a";
+      var style = LINE_STYLES[kind] || LINE_STYLES.support;
       var options = {
-        color: color,
-        lineWidth: 2,
-        lineStyle: 0,
+        color: style.color,
+        lineWidth: style.lineWidth,
+        lineStyle: style.lineStyle,
         priceLineVisible: false,
-        lastValueVisible: false,
+        lastValueVisible: !!style.lastValueVisible,
+        title: style.title || "",
+        crosshairMarkerVisible: false,
+        pointMarkersVisible: false,
       };
       var series = null;
       if (typeof state.chart.addLineSeries === "function") {
@@ -896,7 +907,7 @@ const INJECTED_CHART_SCRIPT = `
         post({ type: "error", message: "line-series-api-missing" });
         return null;
       }
-      state.lineSeries[id] = series;
+      state.lineSeries[key] = series;
       return series;
     }
     function setPatternLines(lines) {
@@ -910,8 +921,11 @@ const INJECTED_CHART_SCRIPT = `
         if (!line || !line.id || !Array.isArray(line.points)) {
           continue;
         }
-        active[line.id] = true;
-        var series = ensureLineSeries(line.id, line.kind || "support");
+        // Key by id and kind so a reused id never keeps a stale colour.
+        var kind = line.kind || "support";
+        var key = line.id + ":" + kind;
+        active[key] = true;
+        var series = ensureLineSeries(key, kind);
         if (series && typeof series.setData === "function") {
           series.setData(line.points);
         }
@@ -924,6 +938,32 @@ const INJECTED_CHART_SCRIPT = `
           }
         });
       }
+    }
+    // The liquidation level is a price line on the main series: full width, labelled on the
+    // axis, and (unlike a line series) it never stretches the time scale.
+    function applyLiquidationLine() {
+      if (state.liqLine && state.liqLineSeries) {
+        try {
+          state.liqLineSeries.removePriceLine(state.liqLine);
+        } catch (e) {
+          // Series already gone.
+        }
+      }
+      state.liqLine = null;
+      state.liqLineSeries = null;
+      var price = state.liqPrice;
+      if (!state.series || typeof state.series.createPriceLine !== "function" || typeof price !== "number" || !isFinite(price)) {
+        return;
+      }
+      state.liqLine = state.series.createPriceLine({
+        price: price,
+        color: "#d94b4b",
+        lineWidth: 2,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "Liq",
+      });
+      state.liqLineSeries = state.series;
     }
     function ensureMarkers() {
       if (state.markerApi) {
@@ -1045,6 +1085,17 @@ const INJECTED_CHART_SCRIPT = `
       }
       setPatternLines(lines);
     };
+    window.__setLiquidationLine = function (price) {
+      if (!ensureChart()) {
+        return;
+      }
+      var next = price === null || price === undefined ? null : Number(price);
+      if (next === state.liqPrice && state.liqLineSeries === state.series && (next === null || state.liqLine)) {
+        return;
+      }
+      state.liqPrice = next;
+      applyLiquidationLine();
+    };
 
     window.__setChartType = function (type) {
       try {
@@ -1052,6 +1103,7 @@ const INJECTED_CHART_SCRIPT = `
           return;
         }
         ensurePriceSeries(type);
+        applyLiquidationLine();
         if (state.pending) {
           setData(state.pending);
         }
@@ -2393,41 +2445,68 @@ function AppContent() {
 
   initializeCandles();
 
+  // Lines are drawn the way a trader would draw them: each appears once its second touch has
+  // printed, runs from its first touch to the latest candle, and stops a few candles past the
+  // breakout.
   const buildPatternLines = () => {
     const candles = candlesRef.current;
-    if (!candles.length) {
+    if (!candles.length || !showPatternLinesRef.current) {
       return [];
     }
     const lastIndex = candles[candles.length - 1]?.index ?? candles.length - 1;
-    const firstIndex = candles[0]?.index ?? 0;
     const baseTime = baseTimeRef.current ?? Math.floor(Date.now() / 1000) - lastIndex * 60;
-
-    // Only include pattern lines if training wheels is enabled
-    const lines = showPatternLinesRef.current
-      ? patternLinesRef.current.map((line) => ({
-          id: line.id,
-          kind: line.kind,
-          points: [
-            { time: Math.floor(baseTime + line.startIndex * 60), value: line.startPrice },
-            { time: Math.floor(baseTime + line.endIndex * 60), value: line.endPrice },
-          ],
-        }))
-      : [];
-    const liquidation = getLiquidationPrice();
-    if (liquidation) {
-      // Extend line far beyond visible range to ensure full-width rendering
-      const farPast = baseTime - 365 * 24 * 60 * 60; // 1 year before
-      const farFuture = baseTime + lastIndex * 60 + 365 * 24 * 60 * 60; // 1 year after
-      lines.push({
-        id: "liquidation-line",
-        kind: "resistance",
-        points: [
-          { time: farPast, value: liquidation.price },
-          { time: farFuture, value: liquidation.price },
-        ],
-      });
+    const toTime = (index: number) => Math.floor(baseTime + index * 60);
+    const lines: { id: string; kind: PatternLineKind; points: { time: number; value: number }[] }[] = [];
+    for (const line of patternLinesRef.current) {
+      if (lastIndex < line.revealIndex) {
+        continue;
+      }
+      const until = Math.min(lastIndex, line.endIndex);
+      const points: { time: number; value: number }[] = [];
+      let previous: { index: number; price: number } | null = null;
+      for (const point of line.points) {
+        if (point.index > until) {
+          // Interpolate the point where the line currently ends.
+          if (previous && until > previous.index) {
+            const t = (until - previous.index) / (point.index - previous.index);
+            points.push({ time: toTime(until), value: previous.price + (point.price - previous.price) * t });
+          }
+          previous = null;
+          break;
+        }
+        points.push({ time: toTime(point.index), value: point.price });
+        previous = point;
+      }
+      const tail = line.points.length >= 2 ? line.points.slice(-2) : null;
+      if (previous && tail && until > previous.index) {
+        // Past the last anchor: project the final segment straight on.
+        const [a, b] = tail;
+        const slope = (b.price - a.price) / Math.max(1, b.index - a.index);
+        points.push({ time: toTime(until), value: b.price + slope * (until - b.index) });
+      }
+      if (points.length >= 2) {
+        lines.push({ id: line.id, kind: line.kind, points });
+      }
     }
     return lines;
+  };
+
+  /** True while some pattern line is still growing with each new candle. */
+  const hasGrowingPatternLine = () => {
+    if (!showPatternLinesRef.current) {
+      return false;
+    }
+    const candles = candlesRef.current;
+    const lastIndex = candles[candles.length - 1]?.index ?? 0;
+    return patternLinesRef.current.some((line) => lastIndex >= line.revealIndex && lastIndex <= line.endIndex + 1);
+  };
+
+  const buildPatternLinesScript = () => {
+    const liquidation = getLiquidationPrice();
+    return (
+      `window.__setPatternLines && window.__setPatternLines(${JSON.stringify(buildPatternLines())});` +
+      `window.__setLiquidationLine && window.__setLiquidationLine(${liquidation ? liquidation.price : "null"});`
+    );
   };
 
   const sendFullChartData = () => {
@@ -2447,8 +2526,7 @@ function AppContent() {
     if (!isWebReadyRef.current) {
       return;
     }
-    const payload = JSON.stringify(buildPatternLines());
-    webViewRef.current?.injectJavaScript(`window.__setPatternLines && window.__setPatternLines(${payload}); true;`);
+    webViewRef.current?.injectJavaScript(`${buildPatternLinesScript()} true;`);
   };
 
   const handleWebMessage = (event: WebViewMessageEvent) => {
@@ -2552,30 +2630,15 @@ function AppContent() {
           if (pattern) {
             const result = pattern.generate(lastClose);
             patternQueueRef.current = result.candles;
-            if (result.lines) {
-              const patternStartIndex = candleIndexRef.current;
-              patternLinesRef.current = result.lines.map((line) => ({
-                id: line.id,
-                kind: line.type,
-                startIndex: patternStartIndex + line.startOffset,
-                endIndex: patternStartIndex + line.endOffset,
-                startPrice: line.startPrice,
-                endPrice: line.endPrice,
-              }));
-            } else {
-              patternLinesRef.current = [];
-            }
-            const patternClose = result.candles.length > 0 ? result.candles[result.candles.length - 1].close : lastClose;
-            const fastResolve =
-              pattern.id === "head-and-shoulders" ||
-              pattern.id === "reverse-head-and-shoulders" ||
-              pattern.id === "double-top" ||
-              pattern.id === "double-bottom";
-            targetQueueRef.current = createTargetRunout(
-              patternClose,
-              result.targetPrice,
-              fastResolve ? { speedMultiplier: 0.6, maxSteps: 10, overshootMultiplier: 0.7, counterChanceMultiplier: 0.7 } : undefined,
-            );
+            targetQueueRef.current = result.runout;
+            const patternStartIndex = candleIndexRef.current;
+            patternLinesRef.current = result.lines.map((line) => ({
+              id: line.id,
+              kind: line.type,
+              points: line.points.map((point) => ({ index: patternStartIndex + point.offset, price: point.price })),
+              revealIndex: patternStartIndex + line.revealOffset,
+              endIndex: patternStartIndex + line.points[line.points.length - 1].offset + line.extendBy,
+            }));
             hasSpawnedPattern.current = true;
             shouldUpdateLines = true;
           }
@@ -2584,11 +2647,9 @@ function AppContent() {
 
       let nextBase: Candle;
       if (patternQueueRef.current.length > 0) {
-        nextBase = patternQueueRef.current[0];
-        patternQueueRef.current = patternQueueRef.current.slice(1);
+        nextBase = patternQueueRef.current.shift()!;
       } else if (targetQueueRef.current.length > 0) {
-        nextBase = targetQueueRef.current[0];
-        targetQueueRef.current = targetQueueRef.current.slice(1);
+        nextBase = targetQueueRef.current.shift()!;
       } else {
         nextBase = createCandle(lastClose);
       }
@@ -2606,12 +2667,12 @@ function AppContent() {
         latestChartDataRef.current.shift();
       }
 
+      let barScript = "";
       if (isWebReadyRef.current) {
         if (!hasSentFullDataRef.current) {
           sendFullChartData();
         } else {
-          const payload = JSON.stringify(bar);
-          webViewRef.current?.injectJavaScript(`window.__updateChartData && window.__updateChartData(${payload}); true;`);
+          barScript = `window.__updateChartData && window.__updateChartData(${JSON.stringify(bar)});`;
         }
       }
 
@@ -2678,8 +2739,11 @@ function AppContent() {
       }
 
       lineUpdateCounterRef.current += 1;
-      if (shouldUpdateLines || (positionsRef.current.length && lineUpdateCounterRef.current % 5 === 0)) {
-        sendPatternLines();
+      const linesDue = shouldUpdateLines || hasGrowingPatternLine() || (positionsRef.current.length > 0 && lineUpdateCounterRef.current % 5 === 0);
+      // One bridge call per tick: the new bar and, when needed, the lines that grew with it.
+      const tickScript = barScript + (linesDue && isWebReadyRef.current ? buildPatternLinesScript() : "");
+      if (tickScript) {
+        webViewRef.current?.injectJavaScript(`${tickScript} true;`);
       }
     }, tickMs);
 

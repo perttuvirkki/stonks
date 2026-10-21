@@ -1,25 +1,24 @@
 import type { PatternDefinition } from "../types";
 import { BASE_PRICE, MAX_PRICE, MIN_PRICE } from "../constants";
-import { ascendingTrianglePattern } from "./ascendingTriangle";
-import { descendingTrianglePattern } from "./descendingTriangle";
-import { headAndShouldersPattern } from "./headAndShoulders";
-import { reverseHeadAndShouldersPattern } from "./reverseHeadAndShoulders";
-import { cupAndHandlePattern } from "./cupAndHandle";
-import { inverseCupAndHandlePattern } from "./inverseCupAndHandle";
-import { bullFlagPattern } from "./bullFlag";
-import { bearFlagPattern } from "./bearFlag";
-import { bullPennantPattern } from "./bullPennant";
-import { bearPennantPattern } from "./bearPennant";
-import { doubleTopPattern } from "./doubleTop";
-import { doubleBottomPattern } from "./doubleBottom";
-import { ascendingWedgePattern } from "./ascendingWedge";
-import { descendingWedgePattern } from "./descendingWedge";
-import { ascendingBroadeningWedgePattern } from "./ascendingBroadeningWedge";
-import { descendingBroadeningWedgePattern } from "./descendingBroadeningWedge";
-import { bullRectanglePattern } from "./bullRectangle";
-import { bearRectanglePattern } from "./bearRectangle";
-import { diamondTopPattern } from "./diamondTop";
-import { diamondBottomPattern } from "./diamondBottom";
+import {
+  ascendingBroadeningWedgePattern,
+  ascendingTrianglePattern,
+  ascendingWedgePattern,
+  descendingBroadeningWedgePattern,
+  descendingTrianglePattern,
+  descendingWedgePattern,
+} from "./triangles";
+import { bearFlagPattern, bearPennantPattern, bearRectanglePattern, bullFlagPattern, bullPennantPattern, bullRectanglePattern } from "./continuations";
+import {
+  cupAndHandlePattern,
+  diamondBottomPattern,
+  diamondTopPattern,
+  doubleBottomPattern,
+  doubleTopPattern,
+  headAndShouldersPattern,
+  inverseCupAndHandlePattern,
+  reverseHeadAndShouldersPattern,
+} from "./reversals";
 import { rangePattern } from "./range";
 
 export const allPatterns: PatternDefinition[] = [
@@ -46,32 +45,6 @@ export const allPatterns: PatternDefinition[] = [
   rangePattern,
 ];
 
-const bullishPatternIds = new Set([
-  "ascending-triangle",
-  "descending-wedge",
-  "descending-broadening-wedge",
-  "reverse-head-and-shoulders",
-  "cup-and-handle",
-  "bull-flag",
-  "bull-rectangle",
-  "diamond-bottom",
-  "bull-pennant",
-  "double-bottom",
-]);
-
-const bearishPatternIds = new Set([
-  "descending-triangle",
-  "ascending-wedge",
-  "ascending-broadening-wedge",
-  "head-and-shoulders",
-  "inverse-cup-and-handle",
-  "bear-flag",
-  "bear-rectangle",
-  "diamond-top",
-  "bear-pennant",
-  "double-top",
-]);
-
 const pickRandom = (patterns: PatternDefinition[]) => patterns[Math.floor(Math.random() * patterns.length)];
 
 export const choosePattern = (currentPrice: number, enabledIds?: string[]) => {
@@ -80,12 +53,20 @@ export const choosePattern = (currentPrice: number, enabledIds?: string[]) => {
     return null;
   }
 
-  const bullish = source.filter((pattern) => bullishPatternIds.has(pattern.id));
-  const bearish = source.filter((pattern) => bearishPatternIds.has(pattern.id));
-  const fallback = pickRandom(source);
+  const bullish = source.filter((pattern) => pattern.bias === "bullish");
+  const bearish = source.filter((pattern) => pattern.bias === "bearish");
+  const neutral = source.filter((pattern) => pattern.bias === "neutral");
 
   if (!Number.isFinite(currentPrice) || bullish.length === 0 || bearish.length === 0) {
-    return fallback;
+    return pickRandom(source);
+  }
+  // Near the price ceiling a bullish pattern would get clipped; only let price fall from there.
+  if (currentPrice > MAX_PRICE * 0.85) {
+    return pickRandom(bearish);
+  }
+  // Neutral patterns (the range) get their fair share instead of never showing up.
+  if (neutral.length && Math.random() < neutral.length / source.length) {
+    return pickRandom(neutral);
   }
 
   // Bias should "center" around BASE_PRICE (not MIN/MAX midpoint).
