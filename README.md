@@ -8,7 +8,7 @@ The game focuses on short, high-volatility rounds with multiple modes, synthetic
 
 ## Tech Stack
 
-- Expo SDK 58
+- Expo SDK 58 (requires Node 22.13+; `.nvmrc` pins Node 24)
 - React Native 0.88 + React 19.3
 - TypeScript
 - `expo-router`
