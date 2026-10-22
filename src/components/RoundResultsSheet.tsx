@@ -54,9 +54,10 @@ export type RoundResultsSheetProps = {
   result: RoundResult | null;
   onNextRound: () => void;
   onShowLeaderboard?: () => void;
+  onReview?: () => void;
 };
 
-export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound, onShowLeaderboard }: RoundResultsSheetProps) => {
+export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound, onShowLeaderboard, onReview }: RoundResultsSheetProps) => {
   const insets = useSafeAreaInsets();
   const windowHeight = Dimensions.get("window").height;
 
@@ -468,6 +469,16 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
 
       <View style={[styles.footer, { paddingBottom: bottomPad }]}>
         <View style={{ gap: 10 }}>
+           {onReview && (
+             <UiButton
+               title={isWin ? "🍀 How did I get lucky?" : isLoss ? "🤡 What went wrong?" : "🔍 Replay"}
+               onPress={onReview}
+               variant="bordered"
+               color={isLoss ? palette.danger : undefined}
+               controlSize="large"
+               darkMode={darkMode}
+             />
+           )}
            <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={styles.buttonWrapper}>
                 <UiButton title="🏷️ Tag" onPress={handleAddTag} variant="bordered" controlSize="large" darkMode={darkMode} />

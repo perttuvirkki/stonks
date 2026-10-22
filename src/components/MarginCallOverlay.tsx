@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import TwemojiSkull from "../../assets/twemoji/1f480.svg";
@@ -11,17 +11,69 @@ import TwemojiTears from "../../assets/twemoji/1f972.svg";
 import TwemojiMirror from "../../assets/twemoji/1fa9e.svg";
 import TwemojiBusts from "../../assets/twemoji/1f465.svg";
 import { UiButton } from "./UiButton";
+import {
+  FundraiserMeme,
+  GroupChatMeme,
+  LossPornMeme,
+  NotificationsMeme,
+  NotStonksMeme,
+  TaxCertificateMeme,
+  ThisIsFineMeme,
+  type MarginCallMemeProps,
+} from "./MarginCallMemes";
 
-export type MarginCallVariant = "classic" | "incomingCall" | "breakingNews" | "instruction" | "mirror";
+export type MarginCallVariant =
+  | "classic"
+  | "incomingCall"
+  | "breakingNews"
+  | "instruction"
+  | "mirror"
+  | "groupChat"
+  | "thisIsFine"
+  | "lossPorn"
+  | "fundraiser"
+  | "notifications"
+  | "notStonks"
+  | "taxCertificate";
+
+export const MARGIN_CALL_VARIANTS: MarginCallVariant[] = [
+  "classic",
+  "incomingCall",
+  "breakingNews",
+  "instruction",
+  "mirror",
+  "groupChat",
+  "thisIsFine",
+  "lossPorn",
+  "fundraiser",
+  "notifications",
+  "notStonks",
+  "taxCertificate",
+];
+
+const MEMES: Partial<Record<MarginCallVariant, (props: MarginCallMemeProps) => ReactNode>> = {
+  groupChat: GroupChatMeme,
+  thisIsFine: ThisIsFineMeme,
+  lossPorn: LossPornMeme,
+  fundraiser: FundraiserMeme,
+  notifications: NotificationsMeme,
+  notStonks: NotStonksMeme,
+  taxCertificate: TaxCertificateMeme,
+};
 
 export type MarginCallOverlayProps = {
   visible: boolean;
   darkMode: boolean;
   variant?: MarginCallVariant;
   onTryAgain: () => void;
+  onReview?: () => void;
+  /** Leverage of the liquidated position, for the memes that name it. */
+  leverage?: number;
+  /** Margin lost to the liquidation. */
+  lossAmount?: number;
 };
 
-export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic", onTryAgain }: MarginCallOverlayProps) => {
+export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic", onTryAgain, onReview, leverage = 0, lossAmount = 0 }: MarginCallOverlayProps) => {
   const insets = useSafeAreaInsets();
   const windowHeight = Dimensions.get("window").height;
   const translateY = useSharedValue(windowHeight);
@@ -85,6 +137,13 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
 
   const bottomPad = Math.max(16, insets.bottom + 12);
 
+  const reviewLink = (color: string) =>
+    onReview ? (
+      <Pressable onPress={onReview} hitSlop={8} style={styles.reviewLink}>
+        <Text style={[styles.reviewLinkText, { color }]}>🤡 What went wrong?</Text>
+      </Pressable>
+    ) : null;
+
   const renderClassic = () => (
     <>
       <View style={[styles.mcdonaldsContainer, { backgroundColor: "#DA291C" }]}>
@@ -130,6 +189,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <Text style={styles.mcdonaldsTagline}>i'm lovin' it™</Text>
       </View>
       <View style={[styles.mcdonaldsFooter, { paddingBottom: bottomPad }]}>
+        {reviewLink("#FFC72C")}
         <UiButton title="Submit Application" onPress={onTryAgain} variant="borderedProminent" color="#FFC72C" controlSize="large" darkMode />
       </View>
     </>
@@ -142,6 +202,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <Text style={styles.callSubtitle}>Incoming call...</Text>
       </View>
       <View style={[styles.callFooter, { paddingBottom: bottomPad }]}>
+        <View style={styles.callReview}>{reviewLink("rgba(255,255,255,0.72)")}</View>
         <View style={styles.callButtons}>
           <View style={styles.callButtonCol}>
             <View style={styles.callButtonWrap}>
@@ -224,6 +285,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
           </View>
         </View>
         <View style={[styles.newspaperFooter, { paddingBottom: bottomPad }]}>
+          {reviewLink("#2d2d2d")}
           <UiButton title="Try again" onPress={onTryAgain} variant="borderedProminent" color="#2d2d2d" controlSize="large" />
         </View>
       </>
@@ -253,6 +315,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         </View>
       </View>
       <View style={[styles.instructionFooter, { paddingBottom: bottomPad }]}>
+        {reviewLink("rgba(255,255,255,0.7)")}
         <UiButton title="I should've read this first" onPress={onTryAgain} variant="borderedProminent" color="#4a4a8a" controlSize="large" darkMode />
       </View>
     </>
@@ -273,6 +336,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <Text style={styles.mirrorAttribution}>— Your reflection</Text>
       </View>
       <View style={[styles.mirrorFooter, { paddingBottom: bottomPad }]}>
+        {reviewLink("rgba(255,255,255,0.7)")}
         <UiButton title="*wipes single tear*" onPress={onTryAgain} variant="borderedProminent" color="#5a5a8a" controlSize="large" darkMode />
       </View>
     </>
@@ -280,7 +344,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
 
   return (
     <Animated.View pointerEvents={visible ? "auto" : "none"} style={[styles.container, { backgroundColor: palette.background }, animatedStyle]}>
-      {variant === "incomingCall" ? renderIncomingCall() : variant === "breakingNews" ? renderBreakingNews() : variant === "instruction" ? renderInstruction() : variant === "mirror" ? renderMirror() : renderClassic()}
+      {MEMES[variant] ? MEMES[variant]({ bottomPad, onTryAgain, reviewLink, leverage, lossAmount }) : variant === "incomingCall" ? renderIncomingCall() : variant === "breakingNews" ? renderBreakingNews() : variant === "instruction" ? renderInstruction() : variant === "mirror" ? renderMirror() : renderClassic()}
     </Animated.View>
   );
 });
@@ -355,6 +419,18 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingHorizontal: 40,
     paddingTop: 10,
+  },
+  reviewLink: {
+    alignSelf: "center",
+    paddingVertical: 8,
+    marginBottom: 6,
+  },
+  reviewLinkText: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  callReview: {
+    marginBottom: 18,
   },
   callButtons: {
     width: "100%",
