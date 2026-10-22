@@ -1,6 +1,6 @@
 import { memo } from "react";
-import { Pressable, Text, type StyleProp, type ViewStyle } from "react-native";
-import * as Haptics from "expo-haptics";
+import { Text, type StyleProp, type ViewStyle } from "react-native";
+import { PressableScale } from "./PressableScale";
 import { getContrastingTextColor } from "./uiColors";
 
 export type ButtonVariant = "bordered" | "borderedProminent" | "plain";
@@ -34,16 +34,15 @@ export const UiButton = memo(({ title, systemImage, onPress, disabled, variant, 
 
   const displayTitle = title ?? (systemImage === "gearshape" ? "⚙︎" : "");
 
-  const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onPress?.();
-  };
+  // Big trade buttons squish less so they still feel solid.
+  const pressedScale = size === "large" ? 0.98 : 0.95;
 
   return (
-    <Pressable
-      onPress={handlePress}
+    <PressableScale
+      onPress={onPress}
       disabled={disabled}
-      style={({ pressed }) => [
+      pressedScale={pressedScale}
+      style={[
         {
           backgroundColor,
           borderColor,
@@ -53,13 +52,13 @@ export const UiButton = memo(({ title, systemImage, onPress, disabled, variant, 
           paddingHorizontal,
           alignItems: "center",
           justifyContent: "center",
-          opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
+          opacity: disabled ? 0.5 : 1,
         },
         style,
       ]}
     >
       {children ? children : <Text style={{ color: textColor, fontSize, fontWeight: "700" }}>{displayTitle}</Text>}
-    </Pressable>
+    </PressableScale>
   );
 });
 

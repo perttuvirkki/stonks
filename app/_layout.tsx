@@ -6,6 +6,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { StyleSheet } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { RevenueCatProvider } from "../src/contexts/RevenueCatContext";
+import { useGameStore } from "../src/stores/useGameStore";
 import Constants from "expo-constants";
 import { trackScreen, vexo } from "vexo-analytics";
 
@@ -34,6 +35,9 @@ SplashScreen.preventAutoHideAsync();
 
 export default function Layout() {
   const navRef = useNavigationContainerRef();
+  const darkMode = useGameStore((state) => state.darkMode);
+  // Whatever peeks out behind screens mid-transition should match the theme, not flash white.
+  const rootBackground = darkMode ? "#0d0f12" : "#ffffff";
 
   // vexo's expo-router auto-attach can't patch SDK 58's NavigationContainer, so report screens via the public ref.
   useEffect(() => {
@@ -48,9 +52,9 @@ export default function Layout() {
   }, [navRef]);
 
   return (
-    <SafeAreaProvider style={styles.container}>
+    <SafeAreaProvider style={[styles.container, { backgroundColor: rootBackground }]}>
       <RevenueCatProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: rootBackground } }} />
       </RevenueCatProvider>
     </SafeAreaProvider>
   );

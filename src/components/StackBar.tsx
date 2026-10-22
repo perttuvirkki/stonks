@@ -1,5 +1,6 @@
 import React from "react";
 import { Text, View } from "react-native";
+import { AnimatedNumber } from "./AnimatedNumber";
 import { UiButton, type ButtonVariant } from "./UiButton";
 
 import TwemojiCandle from "../../assets/twemoji/1f56f.svg";
@@ -87,7 +88,14 @@ export function StackBar({
         ) : (
           <View>
             <Text style={[styles.stackLabel, darkMode && styles.stackLabelDark]}>Stack</Text>
-            <Text style={[styles.stackValue, darkMode && styles.stackValueDark]}>${formatMoney(stackBalance)}</Text>
+            <AnimatedNumber
+              value={stackBalance}
+              format={(value) => `$${formatMoney(value)}`}
+              flash
+              baseColor={darkMode ? "#f5f5f5" : "#111111"}
+              upColor={darkMode ? "#3ddc97" : "#1a9f7a"}
+              style={[styles.stackValue, darkMode && styles.stackValueDark]}
+            />
           </View>
         )}
       </View>

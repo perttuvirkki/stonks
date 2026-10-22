@@ -1,12 +1,14 @@
 import { memo, type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
-import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { Easing, FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import Constants from "expo-constants";
+import { Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as SplashScreen from "expo-splash-screen";
 import * as StoreReview from "expo-store-review";
+import * as SystemUI from "expo-system-ui";
 import { BASE_PRICE, CANDLE_COUNT, HISTORY_COUNT, MAX_PRICE, MIN_PRICE, PATTERN_SPAWN_CHANCE, TICK_MS } from "../src/constants";
 import { CHART_SCRIPT } from "../src/chartScript";
 import { BottomControls } from "../src/components/BottomControls";
@@ -20,6 +22,11 @@ import { ProfitToast } from "../src/components/ProfitToast";
 import { RoundResultsSheet, type RoundResult, type RoundStats } from "../src/components/RoundResultsSheet";
 import { StackBar, type ChartType } from "../src/components/StackBar";
 import { RocketBurst } from "../src/components/RocketBurst";
+import { AnimatedNumber } from "../src/components/AnimatedNumber";
+import { ConfettiBurst } from "../src/components/ConfettiBurst";
+import { MainMenu, MENU_BACKGROUND } from "../src/components/MainMenu";
+import { RoundTimer } from "../src/components/RoundTimer";
+import { gameEnter, gameExit, menuEnter, menuExit, popIn, pushEnter, pushExit } from "../src/transitions";
 import { RevenueCatProvider, useRevenueCat } from "../src/contexts/RevenueCatContext";
 import { useGameStore } from "../src/stores/useGameStore";
 import TwemojiRocket from "../assets/twemoji/1f680.svg";
@@ -43,6 +50,7 @@ import { UiButton } from "../src/components/UiButton";
 import { allPatterns, choosePattern } from "../src/patterns";
 import type { Candle, PatternLineKind } from "../src/types";
 import { createCandle } from "../src/utils";
+import { tapHaptic } from "../src/haptics";
 import * as GameCenter from "../src/services/GameCenterService";
 
 type ChartBar = {
@@ -80,6 +88,13 @@ type TradeToast = {
 
 type LaunchScreen = "menu" | "dailyQuote" | "settings" | "game";
 type GameMode = "sprint60" | "fiveTrades" | "training";
+
+const SCREEN_TRANSITIONS = {
+  menu: { entering: menuEnter, exiting: menuExit },
+  dailyQuote: { entering: pushEnter, exiting: pushExit },
+  settings: { entering: pushEnter, exiting: pushExit },
+  game: { entering: gameEnter, exiting: gameExit },
+} satisfies Record<LaunchScreen, { entering: unknown; exiting: unknown }>;
 
 const CHART_BOTTOM_INSET = 110;
 const TOP_SHEET_OFFSET = -240;
@@ -1400,6 +1415,7 @@ function AppContent() {
   const recordTrade = useGameStore((state) => state.recordTrade);
   const recordLeverageUse = useGameStore((state) => state.recordLeverageUse);
   const lifetimeRounds = useGameStore((state) => state.lifetimeStats.totalRounds);
+  const bestScore = useGameStore((state) => (state.highScores.length ? Math.max(...state.highScores.map((entry) => entry.score)) : null));
   const lifetimeTotalProfit = useGameStore((state) => state.lifetimeStats.totalProfit);
   const lifetimeTotalLoss = useGameStore((state) => state.lifetimeStats.totalLoss);
   const quoteStackBonusTotal = useGameStore((state) => state.quoteStackBonusTotal);
@@ -1510,6 +1526,7 @@ function AppContent() {
   const [moneyPrinterTrigger, setMoneyPrinterTrigger] = useState(0);
   const toastTranslateY = useSharedValue(TOP_SHEET_OFFSET);
   const quoteCashDropProgress = useSharedValue(0);
+  const [quoteConfettiTrigger, setQuoteConfettiTrigger] = useState(0);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTradeLabelRef = useRef<string>("Trade");
@@ -2097,7 +2114,7 @@ function AppContent() {
       clearTimeout(toastHideTimeoutRef.current);
     }
     toastTranslateY.value = withTiming(0, {
-      duration: 240,
+      duration: 280,
       easing: Easing.out(Easing.cubic),
     });
     toastTimeoutRef.current = setTimeout(() => {
@@ -2866,6 +2883,7 @@ function AppContent() {
       duration: 1000,
       easing: Easing.out(Easing.cubic),
     });
+    setQuoteConfettiTrigger(Date.now());
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
       // Ignore.
     });
@@ -2877,220 +2895,221 @@ function AppContent() {
     setShowSpeedHint(false);
   };
 
+  const gameBackground = darkMode ? "#0d0f12" : "#ffffff";
+  const screenBackground =
+    launchScreen === "menu"
+      ? darkMode
+        ? MENU_BACKGROUND.dark
+        : MENU_BACKGROUND.light
+      : launchScreen === "dailyQuote"
+        ? darkMode
+          ? "#151311"
+          : "#f5f0e1"
+        : launchScreen === "settings"
+          ? darkMode
+            ? "#13181d"
+            : "#eef3f8"
+          : gameBackground;
+  // Training mode paints the stack bar green, so the status bar area follows it.
+  const gameTopInsetColor = isTrainingMode ? "#1a9f7a" : gameBackground;
+  const useLightStatusBar = darkMode || (launchScreen === "game" && isTrainingMode);
+
+  // Keep the native root view (behind the home indicator, keyboard and modals) in step with the screen.
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(screenBackground).catch(() => {});
+  }, [screenBackground]);
+
+  let screen: React.ReactNode;
+
   if (launchScreen === "menu") {
-    return (
-      <>
-        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
-          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
-          <View style={styles.launchMenu}>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonQuote]} onPress={() => setLaunchScreen("dailyQuote")}>
-              <Text style={styles.launchMenuTitle}>Daily Quote</Text>
-              <Text style={styles.launchMenuSubtitle}>A money quote for today</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonSprint]} onPress={() => launchGameMode("sprint60")}>
-              <Text style={styles.launchMenuTitle}>60 Second Game</Text>
-              <Text style={styles.launchMenuSubtitle}>Current sprint mode</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonFive]} onPress={() => launchGameMode("fiveTrades")}>
-              <Text style={styles.launchMenuTitle}>5 Trades, Your Pace</Text>
-              <Text style={styles.launchMenuSubtitle}>5 closes and the run ends</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonTraining]} onPress={() => launchGameMode("training")}>
-              <Text style={styles.launchMenuTitle}>Training Wheels</Text>
-              <Text style={styles.launchMenuSubtitle}>Pattern guide mode</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.launchMenuButton, styles.launchMenuButtonPro]}
-              onPress={() => {
-                if (isPro) {
-                  return;
-                }
-                setIsProFeaturesVisible(true);
-              }}
-            >
-              <Text style={styles.launchMenuTitle}>{isPro ? "Pro Active" : "Buy Pro"}</Text>
-              <Text style={styles.launchMenuSubtitle}>{isPro ? "Thanks for supporting" : proPrice ? `Unlock all features (${proPrice})` : "Unlock all features"}</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonSettings]} onPress={openSettings}>
-              <Text style={styles.launchMenuTitle}>Settings</Text>
-              <Text style={styles.launchMenuSubtitle}>Stats, leaderboards, and app options</Text>
-            </Pressable>
-          </View>
-          <ProFeaturesModal
-            visible={isProFeaturesVisible}
-            darkMode={darkMode}
-            price={proPrice}
-            onBuy={handleBuyPro}
-            onClose={() => setIsProFeaturesVisible(false)}
-            isPurchasing={isRevenueCatLoading}
-          />
-        </SafeAreaView>
-        {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
-      </>
+    screen = (
+      <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, { backgroundColor: screenBackground }]}>
+        <MainMenu
+          darkMode={darkMode}
+          stackBalance={initialStackBalance}
+          bestScore={bestScore}
+          roundsPlayed={lifetimeRounds}
+          isPro={isPro}
+          proPrice={proPrice}
+          canClaimDailyQuote={canClaimDailyQuote}
+          dailyBonus={isPro ? 10 : 5}
+          formatMoney={formatMoney}
+          onPlay={launchGameMode}
+          onOpenDailyQuote={() => setLaunchScreen("dailyQuote")}
+          onOpenPro={() => setIsProFeaturesVisible(true)}
+          onOpenSettings={openSettings}
+        />
+        <ProFeaturesModal
+          visible={isProFeaturesVisible}
+          darkMode={darkMode}
+          price={proPrice}
+          onBuy={handleBuyPro}
+          onClose={() => setIsProFeaturesVisible(false)}
+          isPurchasing={isRevenueCatLoading}
+        />
+      </SafeAreaView>
     );
-  }
-
-  if (launchScreen === "dailyQuote") {
-    return (
-      <>
-        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
-          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
-          <View style={[styles.dailyQuoteScreen, darkMode && styles.dailyQuoteScreenDark]}>
-            <View style={styles.dailyQuoteBackButtonWrap}>
-              <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
-            </View>
-            <View style={[styles.dailyQuotePaper, darkMode && styles.dailyQuotePaperDark]}>
-              <View style={[styles.dailyQuoteTopRule, darkMode && styles.dailyQuoteTopRuleDark]} />
-              <View style={[styles.dailyQuoteTopRuleThin, darkMode && styles.dailyQuoteTopRuleThinDark]} />
-              <Text style={[styles.dailyQuoteMasthead, darkMode && styles.dailyQuoteMastheadDark]}>Daily Money</Text>
-              <View style={styles.dailyQuoteDateLine}>
-                <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
-                <Text style={[styles.dailyQuoteDate, darkMode && styles.dailyQuoteDateDark]}>{dailyMoneyDateLine}</Text>
-                <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
-              </View>
-              <View style={styles.dailyQuoteHeadlineWrap}>
-                <Text style={[styles.dailyQuoteHeadline, darkMode && styles.dailyQuoteHeadlineDark]}>“{dailyMoneyQuote.text}”</Text>
-                <View style={[styles.dailyQuoteHeadlineRule, darkMode && styles.dailyQuoteHeadlineRuleDark]} />
-              </View>
-              <Text style={[styles.dailyQuoteByline, darkMode && styles.dailyQuoteBylineDark]}>By {dailyMoneyQuote.author}</Text>
-            </View>
-            <View style={styles.dailyQuoteMoneyRow}>
-              <View style={styles.dailyQuoteMoneyIconWrap}>
-                <TwemojiBanknote width={30} height={30} />
-                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle1]}>
-                  <TwemojiBanknote width={22} height={22} />
-                </Animated.View>
-                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle2]}>
-                  <TwemojiBanknote width={20} height={20} />
-                </Animated.View>
-                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle3]}>
-                  <TwemojiBanknote width={18} height={18} />
-                </Animated.View>
-              </View>
-              <Text style={[styles.dailyQuoteMoneyText, darkMode && styles.dailyQuoteMoneyTextDark]}>Stack: ${formatMoney(initialStackBalance)}</Text>
-            </View>
-            <UiButton
-              onPress={handleClaimDailyQuoteBonus}
-              disabled={!canClaimDailyQuote}
-              variant="borderedProminent"
-              color="#1a9f7a"
-              style={styles.dailyQuoteLockButton}
-              darkMode={darkMode}
-            >
-              <View style={styles.dailyQuoteLockButtonContent}>
-                <TwemojiLock width={18} height={18} />
-                <Text style={styles.dailyQuoteLockButtonText}>{canClaimDailyQuote ? "Lock In" : "Locked In Today"}</Text>
-              </View>
-            </UiButton>
-            <Text style={[styles.dailyQuoteClaimHint, darkMode && styles.dailyQuoteClaimHintDark]}>
-              {canClaimDailyQuote
-                ? isPro
-                  ? "Pro lock-in gives +$10 once per day."
-                  : "Lock in gives +$5 once per day. Pro gives +$10."
-                : "Come back tomorrow for another lock-in bonus."}
-            </Text>
-            {!isPro && (
-              <View style={styles.dailyQuoteProCounter}>
-                <Text style={[styles.dailyQuoteProCounterText, darkMode && styles.dailyQuoteProCounterTextDark]}>
-                  Mom saved this for you: +${formatMoney(quotePendingProBonus)}
-                </Text>
-              </View>
-            )}
-            {!isPro && (
-              <UiButton
-                title={proPrice ? `Unlock savings with Pro (${proPrice})` : "Unlock savings with Pro"}
-                onPress={() => setIsProFeaturesVisible(true)}
-                variant="borderedProminent"
-                color="#7a2038"
-                style={styles.dailyQuoteBuyProButton}
-                darkMode={darkMode}
-              />
-            )}
+  } else if (launchScreen === "dailyQuote") {
+    screen = (
+      <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, { backgroundColor: screenBackground }]}>
+        <View style={[styles.dailyQuoteScreen, darkMode && styles.dailyQuoteScreenDark]}>
+          <View style={styles.dailyQuoteBackButtonWrap}>
+            <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
           </View>
-          <ProFeaturesModal
-            visible={isProFeaturesVisible}
-            darkMode={darkMode}
-            price={proPrice}
-            onBuy={handleBuyPro}
-            onClose={() => setIsProFeaturesVisible(false)}
-            isPurchasing={isRevenueCatLoading}
-          />
-        </SafeAreaView>
-        {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
-      </>
-    );
-  }
-
-  if (launchScreen === "settings") {
-    return (
-      <>
-        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
-          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
-          <View style={[styles.settingsScreen, darkMode && styles.settingsScreenDark]}>
-            <View style={styles.settingsHeaderRow}>
-              <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
+          <View style={[styles.dailyQuotePaper, darkMode && styles.dailyQuotePaperDark]}>
+            <View style={[styles.dailyQuoteTopRule, darkMode && styles.dailyQuoteTopRuleDark]} />
+            <View style={[styles.dailyQuoteTopRuleThin, darkMode && styles.dailyQuoteTopRuleThinDark]} />
+            <Text style={[styles.dailyQuoteMasthead, darkMode && styles.dailyQuoteMastheadDark]}>Daily Money</Text>
+            <View style={styles.dailyQuoteDateLine}>
+              <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
+              <Text style={[styles.dailyQuoteDate, darkMode && styles.dailyQuoteDateDark]}>{dailyMoneyDateLine}</Text>
+              <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
             </View>
-            <View style={styles.settingsHeaderBlock}>
-              <Text style={[styles.settingsTitle, darkMode && styles.settingsTitleDark]}>Settings</Text>
-              <Text style={[styles.settingsSubtitle, darkMode && styles.settingsSubtitleDark]}>
-                {isPro ? "Pro member settings" : "Manage gameplay, account, and app preferences"}
+            <View style={styles.dailyQuoteHeadlineWrap}>
+              <Text style={[styles.dailyQuoteHeadline, darkMode && styles.dailyQuoteHeadlineDark]}>“{dailyMoneyQuote.text}”</Text>
+              <View style={[styles.dailyQuoteHeadlineRule, darkMode && styles.dailyQuoteHeadlineRuleDark]} />
+            </View>
+            <Text style={[styles.dailyQuoteByline, darkMode && styles.dailyQuoteBylineDark]}>By {dailyMoneyQuote.author}</Text>
+          </View>
+          <View style={styles.dailyQuoteMoneyRow}>
+            <View style={styles.dailyQuoteMoneyIconWrap}>
+              <TwemojiBanknote width={30} height={30} />
+              <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle1]}>
+                <TwemojiBanknote width={22} height={22} />
+              </Animated.View>
+              <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle2]}>
+                <TwemojiBanknote width={20} height={20} />
+              </Animated.View>
+              <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle3]}>
+                <TwemojiBanknote width={18} height={18} />
+              </Animated.View>
+            </View>
+            <AnimatedNumber
+              value={initialStackBalance}
+              format={(value) => `Stack: $${formatMoney(value)}`}
+              duration={900}
+              delay={250}
+              flash
+              baseColor={darkMode ? "#b9ead7" : "#0f5132"}
+              style={[styles.dailyQuoteMoneyText, darkMode && styles.dailyQuoteMoneyTextDark]}
+            />
+          </View>
+          <UiButton
+            onPress={handleClaimDailyQuoteBonus}
+            disabled={!canClaimDailyQuote}
+            variant="borderedProminent"
+            color="#1a9f7a"
+            style={styles.dailyQuoteLockButton}
+            darkMode={darkMode}
+          >
+            <View style={styles.dailyQuoteLockButtonContent}>
+              <TwemojiLock width={18} height={18} />
+              <Text style={styles.dailyQuoteLockButtonText}>{canClaimDailyQuote ? "Lock In" : "Locked In Today"}</Text>
+            </View>
+          </UiButton>
+          <Text style={[styles.dailyQuoteClaimHint, darkMode && styles.dailyQuoteClaimHintDark]}>
+            {canClaimDailyQuote
+              ? isPro
+                ? "Pro lock-in gives +$10 once per day."
+                : "Lock in gives +$5 once per day. Pro gives +$10."
+              : "Come back tomorrow for another lock-in bonus."}
+          </Text>
+          {!isPro && (
+            <View style={styles.dailyQuoteProCounter}>
+              <Text style={[styles.dailyQuoteProCounterText, darkMode && styles.dailyQuoteProCounterTextDark]}>
+                Mom saved this for you: +${formatMoney(quotePendingProBonus)}
               </Text>
             </View>
-            <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsScrollContent} showsVerticalScrollIndicator={false}>
-              {settingsSections.map((section) => (
-                <View key={section.id} style={styles.settingsSection}>
-                  <Text style={[styles.settingsSectionTitle, darkMode && styles.settingsSectionTitleDark]}>{section.title}</Text>
-                  <View style={[styles.settingsCard, darkMode && styles.settingsCardDark]}>
-                    {section.rows.map((row, index) => (
-                      <Pressable
-                        key={row.id}
-                        onPress={row.onPress}
-                        style={({ pressed }) => [
-                          styles.settingsRow,
-                          darkMode && styles.settingsRowDark,
-                          index < section.rows.length - 1 && styles.settingsRowBorder,
-                          darkMode && index < section.rows.length - 1 && styles.settingsRowBorderDark,
-                          pressed && styles.settingsRowPressed,
-                          darkMode && pressed && styles.settingsRowPressedDark,
-                        ]}
-                      >
-                        <View style={styles.settingsRowLeading}>
-                          <View style={styles.settingsRowIconWrap}>
-                            <row.icon width={22} height={22} />
-                          </View>
-                          <View style={styles.settingsRowTextWrap}>
-                            <Text style={[styles.settingsRowLabel, darkMode && styles.settingsRowLabelDark]}>{row.label}</Text>
-                            <Text style={[styles.settingsRowSubtitle, darkMode && styles.settingsRowSubtitleDark]}>{row.subtitle}</Text>
-                          </View>
-                        </View>
-                        <Text style={[styles.settingsRowChevron, darkMode && styles.settingsRowChevronDark]}>›</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-          <TopScoreModal visible={isTopScoreVisible} darkMode={darkMode} onClose={() => setIsTopScoreVisible(false)} />
-          <TotalStatsModal visible={isTotalStatsVisible} darkMode={darkMode} onClose={() => setIsTotalStatsVisible(false)} />
-          <ProFeaturesModal
-            visible={isProFeaturesVisible}
-            darkMode={darkMode}
-            price={proPrice}
-            onBuy={handleBuyPro}
-            onClose={() => setIsProFeaturesVisible(false)}
-            isPurchasing={isRevenueCatLoading}
-          />
-        </SafeAreaView>
-        {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
-      </>
+          )}
+          {!isPro && (
+            <UiButton
+              title={proPrice ? `Unlock savings with Pro (${proPrice})` : "Unlock savings with Pro"}
+              onPress={() => setIsProFeaturesVisible(true)}
+              variant="borderedProminent"
+              color="#7a2038"
+              style={styles.dailyQuoteBuyProButton}
+              darkMode={darkMode}
+            />
+          )}
+        </View>
+        <ConfettiBurst trigger={quoteConfettiTrigger} originY={0.62} count={30} />
+        <ProFeaturesModal
+          visible={isProFeaturesVisible}
+          darkMode={darkMode}
+          price={proPrice}
+          onBuy={handleBuyPro}
+          onClose={() => setIsProFeaturesVisible(false)}
+          isPurchasing={isRevenueCatLoading}
+        />
+      </SafeAreaView>
     );
-  }
-
-  return (
-    <>
-      <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, darkMode && styles.containerDark]}>
-        <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+  } else if (launchScreen === "settings") {
+    screen = (
+      <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, { backgroundColor: screenBackground }]}>
+        <View style={[styles.settingsScreen, darkMode && styles.settingsScreenDark]}>
+          <View style={styles.settingsHeaderRow}>
+            <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
+          </View>
+          <View style={styles.settingsHeaderBlock}>
+            <Text style={[styles.settingsTitle, darkMode && styles.settingsTitleDark]}>Settings</Text>
+            <Text style={[styles.settingsSubtitle, darkMode && styles.settingsSubtitleDark]}>
+              {isPro ? "Pro member settings" : "Manage gameplay, account, and app preferences"}
+            </Text>
+          </View>
+          <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsScrollContent} showsVerticalScrollIndicator={false}>
+            {settingsSections.map((section, sectionIndex) => (
+              <Animated.View key={section.id} entering={FadeInDown.delay(120 + sectionIndex * 70).duration(380)} style={styles.settingsSection}>
+                <Text style={[styles.settingsSectionTitle, darkMode && styles.settingsSectionTitleDark]}>{section.title}</Text>
+                <View style={[styles.settingsCard, darkMode && styles.settingsCardDark]}>
+                  {section.rows.map((row, index) => (
+                    <Pressable
+                      key={row.id}
+                      onPress={() => {
+                        tapHaptic();
+                        row.onPress();
+                      }}
+                      style={({ pressed }) => [
+                        styles.settingsRow,
+                        darkMode && styles.settingsRowDark,
+                        index < section.rows.length - 1 && styles.settingsRowBorder,
+                        darkMode && index < section.rows.length - 1 && styles.settingsRowBorderDark,
+                        pressed && styles.settingsRowPressed,
+                        darkMode && pressed && styles.settingsRowPressedDark,
+                      ]}
+                    >
+                      <View style={styles.settingsRowLeading}>
+                        <View style={styles.settingsRowIconWrap}>
+                          <row.icon width={22} height={22} />
+                        </View>
+                        <View style={styles.settingsRowTextWrap}>
+                          <Text style={[styles.settingsRowLabel, darkMode && styles.settingsRowLabelDark]}>{row.label}</Text>
+                          <Text style={[styles.settingsRowSubtitle, darkMode && styles.settingsRowSubtitleDark]}>{row.subtitle}</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.settingsRowChevron, darkMode && styles.settingsRowChevronDark]}>›</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </Animated.View>
+            ))}
+          </ScrollView>
+        </View>
+        <TopScoreModal visible={isTopScoreVisible} darkMode={darkMode} onClose={() => setIsTopScoreVisible(false)} />
+        <TotalStatsModal visible={isTotalStatsVisible} darkMode={darkMode} onClose={() => setIsTotalStatsVisible(false)} />
+        <ProFeaturesModal
+          visible={isProFeaturesVisible}
+          darkMode={darkMode}
+          price={proPrice}
+          onBuy={handleBuyPro}
+          onClose={() => setIsProFeaturesVisible(false)}
+          isPurchasing={isRevenueCatLoading}
+        />
+      </SafeAreaView>
+    );
+  } else {
+    screen = (
+      <SafeAreaView edges={["left", "right"]} style={[styles.container, { backgroundColor: screenBackground }]}>
+        <View style={{ height: insets.top, backgroundColor: gameTopInsetColor }} />
         <ProfitToast
           visible={!!tradeToast}
           darkMode={darkMode}
@@ -3194,16 +3213,15 @@ function AppContent() {
               ))}
             </View>
           </View>
-          {typeof roundSecondsRemaining === "number" && (
-            <View style={[styles.floatingTimer, darkMode && styles.floatingTimerDark]}>
-              <Text style={[styles.floatingTimerText, darkMode && styles.floatingTimerTextDark]}>{Math.max(0, roundSecondsRemaining)}s</Text>
-            </View>
-          )}
+          {typeof roundSecondsRemaining === "number" && <RoundTimer seconds={roundSecondsRemaining} darkMode={darkMode} />}
           {isFiveTradesMode && (
-            <View style={[styles.floatingTradeCounter, darkMode && styles.floatingTradeCounterDark]}>
-              <Text style={[styles.floatingTradeCounterText, darkMode && styles.floatingTradeCounterTextDark]}>
-                Trades: {Math.min(roundTradesMade, FIVE_TRADES_TARGET)}/{FIVE_TRADES_TARGET}
-              </Text>
+            <View pointerEvents="none" style={[styles.floatingTradeCounter, darkMode && styles.floatingTradeCounterDark]}>
+              {/* Remounts per trade so the counter pops each time it ticks up. */}
+              <Animated.View key={roundTradesMade} entering={roundTradesMade > 0 ? popIn : undefined}>
+                <Text style={[styles.floatingTradeCounterText, darkMode && styles.floatingTradeCounterTextDark]}>
+                  Trades: {Math.min(roundTradesMade, FIVE_TRADES_TARGET)}/{FIVE_TRADES_TARGET}
+                </Text>
+              </Animated.View>
             </View>
           )}
           <View style={styles.floatingFollowContainer}>
@@ -3429,8 +3447,26 @@ function AppContent() {
           isPurchasing={isRevenueCatLoading}
         />
       </SafeAreaView>
+    );
+  }
+
+  const transition = SCREEN_TRANSITIONS[launchScreen];
+
+  return (
+    <View style={[styles.container, { backgroundColor: screenBackground }]}>
+      {/* Status bar style goes through the screen's view controller: iOS 27 ignores the app-wide setter RN's StatusBar uses. */}
+      <Stack.Screen options={{ statusBarStyle: useLightStatusBar ? "light" : "dark", statusBarAnimation: "fade" }} />
+      {/* Sub-screens and the game sit above the menu, so a screen sliding back out stays visible over the menu fading in. */}
+      <Animated.View
+        key={launchScreen}
+        entering={transition.entering}
+        exiting={transition.exiting}
+        style={[StyleSheet.absoluteFill, { backgroundColor: screenBackground, zIndex: launchScreen === "menu" ? 0 : 1 }]}
+      >
+        {screen}
+      </Animated.View>
       {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
-    </>
+    </View>
   );
 }
 
@@ -3442,9 +3478,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#ffffff",
-  },
-  containerDark: {
-    backgroundColor: "#0d0f12",
   },
   chartWrapper: {
     flex: 1,
@@ -3605,15 +3638,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     borderRadius: 10,
   },
-  floatingTimer: {
-    position: "absolute",
-    top: 54,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    zIndex: 10,
-  },
-  floatingTimerDark: {},
   floatingSpeed: {
     position: "absolute",
     top: 12,
@@ -3632,19 +3656,6 @@ const styles = StyleSheet.create({
     width: 50,
     paddingHorizontal: 0,
     borderRadius: 10,
-  },
-  floatingTimerText: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#1a9f7a",
-    backgroundColor: "rgba(255, 255, 255, 0.85)",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  floatingTimerTextDark: {
-    backgroundColor: "rgba(13, 15, 18, 0.85)",
   },
   floatingTradeCounter: {
     position: "absolute",
@@ -3668,51 +3679,6 @@ const styles = StyleSheet.create({
   floatingTradeCounterTextDark: {
     backgroundColor: "rgba(13, 15, 18, 0.85)",
     color: "#8fe3c7",
-  },
-  launchMenu: {
-    flex: 1,
-    width: "100%",
-  },
-  launchMenuButton: {
-    flex: 1,
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.25)",
-  },
-  launchMenuButtonQuote: {
-    backgroundColor: "#0f5132",
-    borderTopWidth: 0,
-  },
-  launchMenuButtonSprint: {
-    backgroundColor: "#1a9f7a",
-  },
-  launchMenuButtonFive: {
-    backgroundColor: "#f5a623",
-  },
-  launchMenuButtonTraining: {
-    backgroundColor: "#2e4057",
-  },
-  launchMenuButtonPro: {
-    backgroundColor: "#7a2038",
-  },
-  launchMenuButtonSettings: {
-    backgroundColor: "#374151",
-  },
-  launchMenuTitle: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: "#ffffff",
-    textAlign: "center",
-  },
-  launchMenuSubtitle: {
-    marginTop: 10,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.9)",
-    textAlign: "center",
   },
   settingsScreen: {
     flex: 1,

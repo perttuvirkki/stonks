@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Dimensions, Image, Platform, Share, StyleSheet, Text, TextInput, View, Alert, Modal, TouchableOpacity, TouchableWithoutFeedback, Keyboard } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { Easing, FadeInDown, Keyframe, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import ViewShot, { type ViewShotRef } from "react-native-view-shot";
 import TwemojiRocket from "../../assets/twemoji/1f680.svg";
 import TwemojiCoin from "../../assets/twemoji/1fa99.svg";
@@ -10,6 +10,24 @@ import TwemojiFreezingFace from "../../assets/twemoji/1f976.svg";
 import TwemojiHotFace from "../../assets/twemoji/1f975.svg";
 import TwemojiSkull from "../../assets/twemoji/1f480.svg";
 import { UiButton } from "./UiButton";
+import { AnimatedNumber } from "./AnimatedNumber";
+import { ConfettiBurst } from "./ConfettiBurst";
+import { celebrateHaptic, successHaptic, warningHaptic } from "../haptics";
+
+// The sheet takes ~1.4s to rise; the headline number starts counting once it is mostly in view.
+const COUNT_DELAY_MS = 650;
+const COUNT_DURATION_MS = 900;
+const STAT_STAGGER_MS = 70;
+
+const emojiEnter = new Keyframe({
+  0: { opacity: 0, transform: [{ scale: 0.7 }, { rotate: "-6deg" }] },
+  100: { opacity: 1, transform: [{ scale: 1 }, { rotate: "0deg" }], easing: Easing.out(Easing.cubic) },
+})
+  .duration(520)
+  .delay(450);
+
+const statEnter = (index: number) =>
+  FadeInDown.delay(COUNT_DELAY_MS + 250 + index * STAT_STAGGER_MS).duration(360);
 
 export type RoundStats = {
   tradesMade: number;
@@ -211,6 +229,28 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
     return flatTitles[Math.floor(Math.random() * flatTitles.length)];
   }, [isBigWin, isWin, isWipe, isLoss]);
 
+  const [confettiTrigger, setConfettiTrigger] = useState(0);
+
+  // Land the result with a haptic (and confetti on wins) right as the count-up finishes.
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+    const landing = setTimeout(() => {
+      if (isWin) {
+        setConfettiTrigger(Date.now());
+        if (isBigWin) {
+          celebrateHaptic();
+        } else {
+          successHaptic();
+        }
+      } else if (isLoss) {
+        warningHaptic();
+      }
+    }, COUNT_DELAY_MS + COUNT_DURATION_MS);
+    return () => clearTimeout(landing);
+  }, [isBigWin, isLoss, isWin, visible]);
+
   if (!rendered) {
     return null;
   }
@@ -347,13 +387,17 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
             />
 
           </View>
-          <View style={styles.emojiWrap}>
+          <Animated.View entering={emojiEnter} style={styles.emojiWrap}>
             <Emoji />
-          </View>
-          <Text style={[styles.pnlValue, { color: profitColor }]}>
-            {percentPrefix}
-            {testPercent.toFixed(1)}%
-          </Text>
+          </Animated.View>
+          <AnimatedNumber
+            value={testPercent}
+            initialValue={0}
+            delay={COUNT_DELAY_MS}
+            duration={COUNT_DURATION_MS}
+            format={(value) => `${percentPrefix}${value.toFixed(1)}%`}
+            style={[styles.pnlValue, { color: profitColor }]}
+          />
           <Text style={[styles.title, { color: palette.textPrimary }]}>{titleText}</Text>
           <View style={{ alignItems: 'center', zIndex: 20 }}>
             <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{subtitleText}</Text>
@@ -384,41 +428,43 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
             )}
           </View>
           <View style={[styles.statsContainer, { borderTopColor: palette.divider }]}>
-            <View style={[styles.statRow, { borderBottomColor: palette.divider }]}>
+            <Animated.View entering={statEnter(0)} style={[styles.statRow, { borderBottomColor: palette.divider }]}>
               <Text style={[styles.statLabel, { color: palette.textSecondary }]}>Trades Won</Text>
               <Text style={[styles.statValue, { color: palette.profit }]}>{safeResult.stats.tradesWon}</Text>
-            </View>
-            <View style={[styles.statRow, { borderBottomColor: palette.divider }]}>
+            </Animated.View>
+            <Animated.View entering={statEnter(1)} style={[styles.statRow, { borderBottomColor: palette.divider }]}>
               <Text style={[styles.statLabel, { color: palette.textSecondary }]}>Trades Lost</Text>
               <Text style={[styles.statValue, { color: palette.danger }]}>{safeResult.stats.tradesLost}</Text>
-            </View>
-            <View style={[styles.statRow, { borderBottomColor: palette.divider }]}>
+            </Animated.View>
+            <Animated.View entering={statEnter(2)} style={[styles.statRow, { borderBottomColor: palette.divider }]}>
               <Text style={[styles.statLabel, { color: palette.textSecondary }]}>Best Trade</Text>
               <Text style={[styles.statValue, { color: palette.profit }]}>
                 {safeResult.stats.biggestWinPercent > 0 ? `+${safeResult.stats.biggestWinPercent.toFixed(1)}%` : "—"}
               </Text>
-            </View>
-            <View style={[styles.statRow, { borderBottomColor: palette.divider }]}>
+            </Animated.View>
+            <Animated.View entering={statEnter(3)} style={[styles.statRow, { borderBottomColor: palette.divider }]}>
               <Text style={[styles.statLabel, { color: palette.textSecondary }]}>Worst Trade</Text>
               <Text style={[styles.statValue, { color: palette.danger }]}>
                 {safeResult.stats.biggestLossPercent > 0 ? `-${safeResult.stats.biggestLossPercent.toFixed(1)}%` : "—"}
               </Text>
-            </View>
-            <View style={[styles.statRow, { borderBottomColor: palette.divider }]}>
+            </Animated.View>
+            <Animated.View entering={statEnter(4)} style={[styles.statRow, { borderBottomColor: palette.divider }]}>
               <Text style={[styles.statLabel, { color: palette.textSecondary }]}>Closest to Liquidation</Text>
               <Text style={[styles.statValue, { color: safeResult.stats.closestToLiquidation < 5 ? palette.danger : palette.textPrimary }]}>
                 {safeResult.stats.closestToLiquidation < 100 ? `${safeResult.stats.closestToLiquidation.toFixed(1)}%` : "—"}
               </Text>
-            </View>
-            <View style={[styles.statRow, { borderBottomWidth: 0 }]}>
+            </Animated.View>
+            <Animated.View entering={statEnter(5)} style={[styles.statRow, { borderBottomWidth: 0 }]}>
               <Text style={[styles.statLabel, { color: palette.textSecondary }]}>Longest Trade</Text>
               <Text style={[styles.statValue, { color: palette.textPrimary }]}>
                 {safeResult.stats.longestTrade > 0 ? `${(safeResult.stats.longestTrade / 1000).toFixed(1)}s` : "—"}
               </Text>
-            </View>
+            </Animated.View>
           </View>
         </View>
       </ViewShot>
+
+      <ConfettiBurst trigger={confettiTrigger} originY={0.28} count={isBigWin ? 48 : 34} />
 
       <View style={[styles.footer, { paddingBottom: bottomPad }]}>
         <View style={{ gap: 10 }}>
