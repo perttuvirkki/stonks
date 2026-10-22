@@ -7,8 +7,18 @@ import {
   descendingBroadeningWedgePattern,
   descendingTrianglePattern,
   descendingWedgePattern,
+  symmetricalTrianglePattern,
 } from "./triangles";
-import { bearFlagPattern, bearPennantPattern, bearRectanglePattern, bullFlagPattern, bullPennantPattern, bullRectanglePattern } from "./continuations";
+import {
+  bearFlagPattern,
+  bearPennantPattern,
+  bearRectanglePattern,
+  bullFlagPattern,
+  bullPennantPattern,
+  bullRectanglePattern,
+  fallingChannelPattern,
+  risingChannelPattern,
+} from "./continuations";
 import {
   cupAndHandlePattern,
   diamondBottomPattern,
@@ -18,6 +28,10 @@ import {
   headAndShouldersPattern,
   inverseCupAndHandlePattern,
   reverseHeadAndShouldersPattern,
+  roundingBottomPattern,
+  roundingTopPattern,
+  tripleBottomPattern,
+  tripleTopPattern,
 } from "./reversals";
 import { rangePattern } from "./range";
 
@@ -42,6 +56,13 @@ export const allPatterns: PatternDefinition[] = [
   bearPennantPattern,
   doubleTopPattern,
   doubleBottomPattern,
+  tripleTopPattern,
+  tripleBottomPattern,
+  symmetricalTrianglePattern,
+  risingChannelPattern,
+  fallingChannelPattern,
+  roundingTopPattern,
+  roundingBottomPattern,
   rangePattern,
 ];
 

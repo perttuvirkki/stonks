@@ -58,35 +58,47 @@ export const [doubleBottomPattern, doubleTopPattern] = definePair(
   },
 );
 
+/**
+ * A rounded U from a left lip back up to the rim, with small swings riding along the curve.
+ * `flatness` is the exponent of the curve: higher means a flatter, saucer-like bottom.
+ */
+const roundedBase = (s: Sketch, id: string, length: number, flatness: number, volScale: number) => {
+  const rim = s.at(range(0.05, 0.1));
+  const lip = s.swing(rangeInt(3, 5), rim, "top");
+  const curve = (x: number) => s.shift(rim, -(1 - Math.pow(Math.abs(2 * x - 1), flatness)));
+  const steps = 2 * rangeInt(4, 5);
+  let side: "top" | "bottom" = "bottom";
+  let previous = rim;
+  for (let step = 1; step < steps; step += 1) {
+    const x = step / steps;
+    const wobble = s.height * range(0.05, 0.1);
+    const minSwing = s.height * 0.06;
+    const towardTop = side === "top" ? s.dir : -s.dir;
+    let price = curve(x) + towardTop * wobble;
+    // Keep alternation honest on the steep walls: each top above the last bottom and vice versa.
+    if ((price - previous) * towardTop < minSwing) {
+      price = previous + towardTop * minSwing;
+    }
+    s.swing(lip + Math.round(length * x) - s.index, price, side, volScale);
+    previous = price;
+    side = side === "top" ? "bottom" : "top";
+  }
+  const rightLip = s.swing(lip + length - s.index, rim + s.dir * range(-0.02, 0.01) * s.height, "top");
+  const arc: Array<{ index: number; price: number }> = [];
+  for (let k = 0; k <= 12; k += 1) {
+    arc.push({ index: lip + Math.round((length * k) / 12), price: curve(k / 12) });
+  }
+  s.draw(`${id}-curve`, "guide", { points: arc }, [lip, lip + Math.round(length / 2)], 0);
+  return { rim, lip, rightLip };
+};
+
 export const [cupAndHandlePattern, inverseCupAndHandlePattern] = definePair(
   { id: "cup-and-handle", label: "Cup & Handle" },
   { id: "inverse-cup-and-handle", label: "Inverse Cup & Handle" },
   70,
   [8, 12],
   (s, id) => {
-    const rim = s.at(range(0.05, 0.1));
-    const lip = s.swing(rangeInt(3, 5), rim, "top");
-    const cupLength = rangeInt(38, 52);
-    // A rounded U: depth follows 1 - |2x - 1|^2.2, with small swings riding along it.
-    const curve = (x: number) => s.shift(rim, -(1 - Math.pow(Math.abs(2 * x - 1), 2.2)));
-    const steps = 2 * rangeInt(4, 5);
-    let side: "top" | "bottom" = "bottom";
-    let previous = rim;
-    for (let step = 1; step < steps; step += 1) {
-      const x = step / steps;
-      const wobble = s.height * range(0.05, 0.1);
-      const minSwing = s.height * 0.06;
-      const towardTop = side === "top" ? s.dir : -s.dir;
-      let price = curve(x) + towardTop * wobble;
-      // Keep alternation honest on the steep walls: each top above the last bottom and vice versa.
-      if ((price - previous) * towardTop < minSwing) {
-        price = previous + towardTop * minSwing;
-      }
-      s.swing(lip + Math.round(cupLength * x) - s.index, price, side, 0.85);
-      previous = price;
-      side = side === "top" ? "bottom" : "top";
-    }
-    const rightLip = s.swing(lip + cupLength - s.index, rim + s.dir * range(-0.02, 0.01) * s.height, "top");
+    const { rim, lip, rightLip } = roundedBase(s, id, rangeInt(38, 52), 2.2, 0.85);
     // The handle: a short, quiet drift down that shakes out weak hands.
     s.swing(rangeInt(3, 5), s.shift(rim, -range(0.26, 0.34)), "bottom", 0.75);
     s.swing(rangeInt(2, 4), s.shift(rim, -range(0.1, 0.16)), "top", 0.7);
@@ -94,12 +106,44 @@ export const [cupAndHandlePattern, inverseCupAndHandlePattern] = definePair(
     const rimLine = s.line(lip, rim, rightLip, rim);
     s.fence(lip, s.index, { ceiling: rimLine });
     s.draw(`${id}-rim`, "ceiling", { line: rimLine }, [lip, rightLip]);
-    const arc: Array<{ index: number; price: number }> = [];
-    for (let k = 0; k <= 12; k += 1) {
-      arc.push({ index: lip + Math.round((cupLength * k) / 12), price: curve(k / 12) });
-    }
-    s.draw(`${id}-cup`, "guide", { points: arc }, [lip, lip + Math.round(cupLength / 2)], 0);
     return s.finish(id, { target: s.beyond(rim, s.height), breakout: rimLine });
+  },
+);
+
+export const [roundingBottomPattern, roundingTopPattern] = definePair(
+  { id: "rounding-bottom", label: "Rounding Bottom" },
+  { id: "rounding-top", label: "Rounding Top" },
+  66,
+  [8, 12],
+  (s, id) => {
+    // A slower, flatter saucer than the cup, and no handle: just a brief pause at the rim.
+    const { rim, lip, rightLip } = roundedBase(s, id, rangeInt(50, 64), 3, 0.75);
+    s.swing(rangeInt(2, 4), s.shift(rim, -range(0.1, 0.16)), "bottom", 0.7);
+    const rimLine = s.line(lip, rim, rightLip, rim);
+    s.fence(lip, s.index, { ceiling: rimLine });
+    s.draw(`${id}-rim`, "ceiling", { line: rimLine }, [lip, rightLip]);
+    return s.finish(id, { target: s.beyond(rim, s.height), breakout: rimLine });
+  },
+);
+
+export const [tripleBottomPattern, tripleTopPattern] = definePair(
+  { id: "triple-bottom", label: "Triple Bottom" },
+  { id: "triple-top", label: "Triple Top" },
+  52,
+  [8, 12],
+  (s, id) => {
+    const low = s.at(-1);
+    const neck = s.at(range(-0.2, -0.05));
+    const first = leg(s, rangeInt(12, 16), low, "bottom", 1.1);
+    const peak = s.swing(rangeInt(7, 10), neck, "top");
+    const second = s.swing(rangeInt(7, 10), s.at(-1 + range(-0.02, 0.05)), "bottom");
+    const secondPeak = s.swing(rangeInt(7, 10), s.shift(neck, -range(0, 0.05)), "top");
+    const third = s.swing(rangeInt(7, 10), s.at(-1 + range(-0.02, 0.05)), "bottom");
+    const neckline = s.line(peak, neck, peak + 1, neck);
+    s.fence(peak, third, { ceiling: neckline });
+    s.draw(`${id}-floor`, "floor", { line: s.line(first, low, third, low) }, [first, second, third]);
+    s.draw(`${id}-neckline`, "neckline", { line: neckline }, [peak, secondPeak]);
+    return s.finish(id, { target: s.beyond(neck, Math.abs(neck - low)), breakout: neckline, retestChance: 0.5, speed: 0.8 });
   },
 );
 

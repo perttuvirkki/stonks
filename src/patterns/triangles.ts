@@ -1,5 +1,6 @@
 import { pick, rangeInt } from "../market/random";
-import { definePair, lineAt } from "./sketch";
+import type { PatternDefinition } from "../types";
+import { definePair, lineAt, Sketch } from "./sketch";
 
 // Triangles and wedges: price coils between two trendlines, swings shorten (and volatility
 // fades) toward the apex, then it breaks out with a burst. Written bullish; the bearish twin
@@ -60,3 +61,23 @@ export const [descendingBroadeningWedgePattern, ascendingBroadeningWedgePattern]
     return s.finish(id, { target: s.beyond(breakout, widest * 0.8), breakout: ceiling });
   },
 );
+
+// Neutral: both lines converge evenly, so only the breakout tells you which way it goes.
+export const symmetricalTrianglePattern: PatternDefinition = {
+  id: "symmetrical-triangle",
+  label: "Symmetrical Triangle",
+  bias: "neutral",
+  length: 60,
+  generate: (startPrice) => {
+    const id = "symmetrical-triangle";
+    const s = new Sketch(startPrice, pick([1, -1] as const), [8, 12]);
+    const end = rangeInt(50, 70);
+    const ceiling = s.line(0, s.at(0.6), end, s.at(0.1));
+    const floor = s.line(0, s.at(-0.4), end, s.at(0));
+    const touches = s.zigzag({ ceiling, floor, end, swings: pick([6, 8]), first: "top", squeeze: 0.88, contract: true });
+    s.draw(`${id}-upper`, "ceiling", { line: ceiling }, touches.top);
+    s.draw(`${id}-lower`, "floor", { line: floor }, touches.bottom);
+    const widest = Math.abs(lineAt(ceiling, touches.top[0] ?? 0) - lineAt(floor, touches.top[0] ?? 0));
+    return s.finish(id, { target: s.beyond(lineAt(ceiling, end), widest), breakout: ceiling });
+  },
+};

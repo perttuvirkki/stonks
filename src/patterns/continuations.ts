@@ -76,3 +76,21 @@ export const [bullRectanglePattern, bearRectanglePattern] = definePair(
     return s.finish(id, { target: s.beyond(high, s.height), breakout: ceiling });
   },
 );
+
+export const [fallingChannelPattern, risingChannelPattern] = definePair(
+  { id: "falling-channel", label: "Falling Channel" },
+  { id: "rising-channel", label: "Rising Channel" },
+  60,
+  [8, 12],
+  (s, id) => {
+    const end = rangeInt(50, 70);
+    const width = range(0.55, 0.75);
+    // Two parallel lines leaning against the eventual breakout; price ping-pongs between them.
+    const ceiling = s.line(0, s.at(width / 2), end, s.at(width / 2 - 1.1));
+    const floor = s.line(0, s.at(-width / 2), end, s.at(-width / 2 - 1.1));
+    const touches = s.zigzag({ ceiling, floor, end, swings: pick([6, 8]), first: "top", missChance: 0.25 });
+    s.draw(`${id}-upper`, "ceiling", { line: ceiling }, touches.top);
+    s.draw(`${id}-lower`, "floor", { line: floor }, touches.bottom);
+    return s.finish(id, { target: s.beyond(lineAt(ceiling, end), width * s.height * 1.2), breakout: ceiling });
+  },
+);
