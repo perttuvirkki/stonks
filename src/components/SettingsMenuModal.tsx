@@ -123,7 +123,7 @@ SettingsMenuModal.displayName = "SettingsMenuModal";
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 70,
   },
   header: {

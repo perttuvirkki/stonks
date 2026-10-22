@@ -135,7 +135,7 @@ export const TopScoreModal = memo(({ visible, darkMode, onClose }: TopScoreModal
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 60,
   },
   content: {

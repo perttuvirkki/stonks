@@ -1,13 +1,13 @@
 import "react-native-reanimated";
+import { useEffect } from "react";
 import { configureReanimatedLogger, ReanimatedLogLevel } from "react-native-reanimated";
-import { Stack } from "expo-router";
+import { Stack, useNavigationContainerRef } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { StatusBar } from "expo-status-bar";
 import { StyleSheet } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { RevenueCatProvider } from "../src/contexts/RevenueCatContext";
 import Constants from "expo-constants";
-import { vexo } from "vexo-analytics";
+import { trackScreen, vexo } from "vexo-analytics";
 
 if (__DEV__) {
   configureReanimatedLogger({
@@ -33,11 +33,24 @@ if (vexoApiKey) {
 SplashScreen.preventAutoHideAsync();
 
 export default function Layout() {
+  const navRef = useNavigationContainerRef();
+
+  // vexo's expo-router auto-attach can't patch SDK 58's NavigationContainer, so report screens via the public ref.
+  useEffect(() => {
+    if (!vexoApiKey || !navRef) return;
+    const report = () => {
+      const route = navRef.getCurrentRoute() as { name?: string } | undefined;
+      const name = route?.name;
+      if (name) trackScreen(name);
+    };
+    report();
+    return navRef.addListener("state", report);
+  }, [navRef]);
+
   return (
     <SafeAreaProvider style={styles.container}>
       <RevenueCatProvider>
         <Stack screenOptions={{ headerShown: false }} />
-        <StatusBar style="auto" />
       </RevenueCatProvider>
     </SafeAreaProvider>
   );

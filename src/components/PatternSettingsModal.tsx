@@ -166,7 +166,7 @@ export const PatternSettingsModal = memo(({ visible, darkMode, patterns, enabled
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 50,
   },
   header: {

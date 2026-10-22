@@ -143,7 +143,7 @@ export const RocketBurst = memo(function RocketBurst({ trigger, darkMode, width,
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
   },
   rocket: {
