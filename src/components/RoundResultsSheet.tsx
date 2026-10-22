@@ -189,6 +189,8 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
     { title: "That was clean ✨", subtitle: "No hesitation. Respect." },
     { title: "We like the stock 🚀", subtitle: "And it liked you back." },
     { title: "DD paid off 📚", subtitle: "Due diligence for the win." },
+    { title: "Stonks 📈", subtitle: "Line goes up. You did nothing to deserve this." },
+    { title: "Accidentally competent 🤷", subtitle: "Please don't screenshot this. It won't happen again." },
   ];
 
   const wipeTitles = [
@@ -197,6 +199,8 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
     { title: "Portfolio evaporated 💨", subtitle: "At least you still have your health." },
     { title: "Margin called 📞", subtitle: "Your broker sends their regards." },
     { title: "Rekt 💥", subtitle: "Leverage hits different when it's against you." },
+    { title: "Sir, this is a casino 🎰", subtitle: "And the house just sent you a thank-you card." },
+    { title: "Not stonks 📉", subtitle: "Line went down. You were holding the line." },
   ];
 
   const lossTitles = [
@@ -205,6 +209,8 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
     { title: "Not your candle 🕯️", subtitle: "The chart had other plans." },
     { title: "Bought the dip... 📉", subtitle: "It dipped more. Classic." },
     { title: "Bag holder 🛍️", subtitle: "Hold the line next time." },
+    { title: "Inverse you = profit 🔄", subtitle: "Someone out there is copying your trades backwards. Smart." },
+    { title: "Skill issue 🎮", subtitle: "The chart was fine. It's you." },
   ];
 
   const flatTitles = [
