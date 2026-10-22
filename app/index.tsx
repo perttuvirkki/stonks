@@ -13,13 +13,14 @@ import { BASE_PRICE, CANDLE_COUNT, HISTORY_COUNT, MAX_PRICE, MIN_PRICE, PATTERN_
 import { CHART_SCRIPT } from "../src/chartScript";
 import { BottomControls } from "../src/components/BottomControls";
 import { AnimatedSplash } from "../src/components/AnimatedSplash";
-import { MarginCallOverlay, type MarginCallVariant } from "../src/components/MarginCallOverlay";
+import { MARGIN_CALL_VARIANTS, MarginCallOverlay, type MarginCallVariant } from "../src/components/MarginCallOverlay";
 import { PatternSettingsModal } from "../src/components/PatternSettingsModal";
 import { ProFeaturesModal } from "../src/components/ProFeaturesModal";
 import { TopScoreModal } from "../src/components/TopScoreModal";
 import { TotalStatsModal } from "../src/components/TotalStatsModal";
 import { ProfitToast } from "../src/components/ProfitToast";
 import { RoundResultsSheet, type RoundResult, type RoundStats } from "../src/components/RoundResultsSheet";
+import { RoundReviewSheet } from "../src/components/RoundReviewSheet";
 import { StackBar, type ChartType } from "../src/components/StackBar";
 import { RocketBurst } from "../src/components/RocketBurst";
 import { AnimatedNumber } from "../src/components/AnimatedNumber";
@@ -49,6 +50,7 @@ import type { ButtonVariant } from "../src/components/UiButton";
 import { UiButton } from "../src/components/UiButton";
 import { allPatterns, choosePattern } from "../src/patterns";
 import type { Candle, PatternLineKind } from "../src/types";
+import type { ReviewPattern, ReviewTrade, ReviewTradeOutcome, RoundReviewData } from "../src/review/roundReview";
 import { createCandle } from "../src/utils";
 import { tapHaptic } from "../src/haptics";
 import * as GameCenter from "../src/services/GameCenterService";
@@ -1450,6 +1452,7 @@ function AppContent() {
   const [isTopScoreVisible, setIsTopScoreVisible] = useState(false);
   const [isTotalStatsVisible, setIsTotalStatsVisible] = useState(false);
   const [marginCallVariant, setMarginCallVariant] = useState<MarginCallVariant>("classic");
+  const [marginCallLoss, setMarginCallLoss] = useState({ leverage: 0, amount: 0 });
   const [baseTickMs, setBaseTickMs] = useState<ChartSpeedMs>(TICK_MS as ChartSpeedMs);
   const baseTickMsRef = useRef<number>(TICK_MS);
   const [tickMs, setTickMs] = useState(TICK_MS);
@@ -1460,6 +1463,12 @@ function AppContent() {
   const isOvertimeRef = useRef(false);
   const isRoundResultsVisibleRef = useRef(false);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
+  const [roundReview, setRoundReview] = useState<RoundReviewData | null>(null);
+  // What the post-game review re-draws: the round's trades, recent patterns and how the round ended.
+  const tradeJournalRef = useRef<ReviewTrade[]>([]);
+  const patternLogRef = useRef<ReviewPattern[]>([]);
+  const roundEndIndexRef = useRef<number | null>(null);
+  const liquidationPriceRef = useRef<number | null>(null);
   const [roundSecondsRemaining, setRoundSecondsRemaining] = useState<number | null>(null);
   const [isPatternSettingsVisible, setIsPatternSettingsVisible] = useState(false);
   const [currentPatternLabel, setCurrentPatternLabel] = useState<string | null>(null);
@@ -1761,11 +1770,12 @@ function AppContent() {
 
     // Close positions BEFORE clearing round refs so stats are tracked.
     if (positionsRef.current.length) {
-      closeAllPositionsAtPrice(price, { showToast: false, evaluateRoundCompletion: false });
+      closeAllPositionsAtPrice(price, { showToast: false, evaluateRoundCompletion: false, journalOutcome: "bell" });
     }
 
     roundEndsAtRef.current = null;
     roundStartedAtRef.current = null;
+    roundEndIndexRef.current = candleIndexRef.current - 1;
 
     setRoundResult({ startNetWorth, endNetWorth, profit, percent, durationMs, stats: { ...roundStatsRef.current } });
     setTickMs(ROUND_END_SLOW_TICK_MS);
@@ -1801,10 +1811,24 @@ function AppContent() {
     }, ROUND_END_SHEET_DELAY_MS);
   };
 
-  const closeAllPositionsAtPrice = (price: number, options: { showToast: boolean; evaluateRoundCompletion?: boolean }) => {
+  const closeOpenJournalTrades = (price: number, outcome: ReviewTradeOutcome) => {
+    for (const trade of tradeJournalRef.current) {
+      if (trade.outcome === "open") {
+        trade.exitIndex = candleIndexRef.current - 1;
+        trade.exitPrice = price;
+        trade.outcome = outcome;
+      }
+    }
+  };
+
+  const closeAllPositionsAtPrice = (
+    price: number,
+    options: { showToast: boolean; evaluateRoundCompletion?: boolean; journalOutcome?: ReviewTradeOutcome },
+  ) => {
     if (positionsRef.current.length === 0) {
       return;
     }
+    closeOpenJournalTrades(price, options.journalOutcome ?? "closed");
     const costBasis = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
     const earliestEntry = Math.min(...positionsRef.current.map((p) => p.entryTime));
     const tradeDuration = Date.now() - earliestEntry;
@@ -2261,12 +2285,9 @@ function AppContent() {
   };
 
   const pickMarginCallVariant = (): MarginCallVariant => {
-    const roll = Math.random();
-    if (roll < 0.2) return "incomingCall";
-    if (roll < 0.4) return "breakingNews";
-    if (roll < 0.6) return "instruction";
-    if (roll < 0.8) return "mirror";
-    return "classic";
+    // Never the same meme twice in a row.
+    const options = MARGIN_CALL_VARIANTS.filter((variant) => variant !== marginCallVariant);
+    return options[Math.floor(Math.random() * options.length)];
   };
 
   const applyChartType = (nextType: ChartType) => {
@@ -2288,7 +2309,38 @@ function AppContent() {
     setIsChartFollowing(true);
   };
 
+  const openRoundReview = (liquidated: boolean) => {
+    const trades = tradeJournalRef.current;
+    const lastIndex = candleIndexRef.current - 1;
+    const roundEndIndex = roundEndIndexRef.current ?? lastIndex;
+    // Start a little before the first trade so the pattern it was taken in is on screen.
+    const fromIndex = Math.min(trades[0]?.entryIndex ?? roundEndIndex, roundEndIndex) - 30;
+    const candles = candlesRef.current
+      .filter((candle) => (candle.index ?? 0) >= fromIndex)
+      .map((candle) => {
+        const index = candle.index ?? 0;
+        return {
+          index,
+          open: candle.open,
+          close: candle.close,
+          high: Math.max(candle.high, candle.open, candle.close),
+          low: Math.min(candle.low, candle.open, candle.close),
+        };
+      });
+    const firstIndex = candles[0]?.index ?? fromIndex;
+    setRoundReview({
+      candles,
+      trades: trades.map((trade) => ({ ...trade })),
+      patterns: patternLogRef.current.filter((pattern) => pattern.endIndex >= firstIndex && pattern.startIndex <= lastIndex),
+      roundEndIndex,
+      liquidationPrice: liquidated ? liquidationPriceRef.current : null,
+      liquidated,
+      percent: liquidated ? -100 : roundResult?.percent ?? 0,
+    });
+  };
+
   const resetRun = () => {
+    setRoundReview(null);
     if (marginCallTimeoutRef.current) {
       clearTimeout(marginCallTimeoutRef.current);
       marginCallTimeoutRef.current = null;
@@ -2337,6 +2389,7 @@ function AppContent() {
   };
 
   const dismissRoundResults = () => {
+    setRoundReview(null);
     setTickMs(baseTickMsRef.current);
     resetRoundState();
     stackBalanceRef.current = initialStackBalance;
@@ -2370,8 +2423,24 @@ function AppContent() {
     if (amount < 0.01) {
       return;
     }
+    if (!roundEndsAtRef.current) {
+      // A new round starts with this trade.
+      tradeJournalRef.current = [];
+      roundEndIndexRef.current = null;
+      liquidationPriceRef.current = null;
+    }
     startRoundIfNeeded(price);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    tradeJournalRef.current.push({
+      side,
+      leverage: useLeverage ? leverage : 1,
+      spot: !useLeverage,
+      entryIndex: candleIndexRef.current - 1,
+      entryPrice: price,
+      exitIndex: null,
+      exitPrice: null,
+      outcome: "open",
+    });
 
     const positionSize = amount * leverage;
     const units = positionSize / price;
@@ -2656,6 +2725,19 @@ function AppContent() {
               revealIndex: patternStartIndex + line.revealOffset,
               endIndex: patternStartIndex + line.points[line.points.length - 1].offset + line.extendBy,
             }));
+            const formationEndIndex = patternStartIndex + result.candles.length - 1;
+            patternLogRef.current = [
+              ...patternLogRef.current.slice(-11),
+              {
+                id: pattern.id,
+                label: pattern.label,
+                bias: pattern.bias,
+                startIndex: patternStartIndex,
+                formationEndIndex,
+                endIndex: formationEndIndex + result.runout.length,
+                lines: patternLinesRef.current.map(({ id, kind, points, endIndex }) => ({ id, kind, points, endIndex })),
+              },
+            ];
             hasSpawnedPattern.current = true;
             shouldUpdateLines = true;
           }
@@ -2719,6 +2801,9 @@ function AppContent() {
             const capturedStats = { ...roundStatsRef.current };
             const capturedRoundStartedAt = roundStartedAtRef.current;
             const margin = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
+            closeOpenJournalTrades(bar.close, "liquidated");
+            roundEndIndexRef.current = next.index;
+            liquidationPriceRef.current = liquidation.price;
 
             resetRoundState();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -2732,6 +2817,7 @@ function AppContent() {
             }
             marginCallTimeoutRef.current = setTimeout(() => {
               setMarginCallVariant(pickMarginCallVariant());
+              setMarginCallLoss({ leverage: liquidatedLeverage, amount: margin });
               setIsMarginCallVisible(true);
               marginCallTimeoutRef.current = null;
 
@@ -3409,13 +3495,23 @@ function AppContent() {
           result={roundResult}
           darkMode={darkMode}
           onShowLeaderboard={() => GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE)}
+          onReview={() => openRoundReview(false)}
           onNextRound={() => {
             setIsRoundResultsVisible(false);
             isRoundResultsVisibleRef.current = false;
             dismissRoundResults();
           }}
         />
-        <MarginCallOverlay visible={isMarginCallVisible} darkMode={darkMode} variant={marginCallVariant} onTryAgain={resetRun} />
+        <MarginCallOverlay
+          visible={isMarginCallVisible}
+          darkMode={darkMode}
+          variant={marginCallVariant}
+          onTryAgain={resetRun}
+          onReview={() => openRoundReview(true)}
+          leverage={marginCallLoss.leverage}
+          lossAmount={marginCallLoss.amount}
+        />
+        <RoundReviewSheet data={roundReview} darkMode={darkMode} onClose={() => setRoundReview(null)} />
         <PatternSettingsModal
           visible={isPatternSettingsVisible}
           darkMode={darkMode}
