@@ -1,5 +1,5 @@
 import { memo, type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, BackHandler, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from "react-native";
+import { Alert, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
@@ -23,6 +23,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import Constants from "expo-constants";
+import { Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as SplashScreen from "expo-splash-screen";
 import * as StoreReview from "expo-store-review";
@@ -3230,7 +3231,7 @@ function AppContent() {
       <>
         <Animated.View key="menu" entering={screenEntering} exiting={screenExiting} style={styles.screenTransition}>
           <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, { backgroundColor: terminal.bg }]}>
-          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+          <Stack.Screen options={{ statusBarStyle: darkMode ? "light" : "dark", statusBarAnimation: "fade" }} />
           <View style={[styles.terminalHeader, { backgroundColor: terminal.header }]}>
             <Text style={[styles.terminalHeaderBrand, { color: terminal.headerText }]}>STONKS</Text>
             <Text style={[styles.terminalHeaderMeta, { color: terminal.headerText }]}>{isPro ? "PRO" : "MAIN"} MENU &lt;GO&gt;</Text>
@@ -3289,7 +3290,7 @@ function AppContent() {
       <>
         <Animated.View key="dailyQuote" entering={screenEntering} exiting={screenExiting} style={styles.screenTransition}>
           <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, { backgroundColor: terminal.bg }]}>
-          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+          <Stack.Screen options={{ statusBarStyle: darkMode ? "light" : "dark", statusBarAnimation: "fade" }} />
           <View style={[styles.terminalHeader, { backgroundColor: terminal.header }]}>
             <View style={styles.dailyQuoteHeaderLeft}>
               <Pressable
@@ -3460,7 +3461,7 @@ function AppContent() {
             edges={["top", "left", "right", "bottom"]}
             style={[styles.container, styles.settingsSafeArea, darkMode && styles.settingsSafeAreaDark]}
           >
-          <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+          <Stack.Screen options={{ statusBarStyle: darkMode ? "light" : "dark", statusBarAnimation: "fade" }} />
           <View style={[styles.settingsScreen, darkMode && styles.settingsScreenDark]}>
             <View style={[styles.settingsHeaderRow, styles.settingsContentWidth]}>
               <UiButton title="← Back" onPress={openMenuScreen} variant="bordered" darkMode={darkMode} />
@@ -3527,7 +3528,7 @@ function AppContent() {
     <>
       <Animated.View key="game" entering={screenEntering} exiting={screenExiting} style={styles.screenTransition}>
         <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, darkMode && styles.containerDark]}>
-        <StatusBar barStyle={darkMode && !isTrainingMode ? "light-content" : "dark-content"} />
+        <Stack.Screen options={{ statusBarStyle: darkMode && !isTrainingMode ? "light" : "dark", statusBarAnimation: "fade" }} />
         {isTrainingMode && <View pointerEvents="none" style={[styles.trainingTopInset, { height: insets.top }]} />}
         <ProfitToast
           visible={!!tradeToast}
