@@ -1,28 +1,26 @@
-import type { Candle, PatternDefinition, PatternDirection, PatternLine, PatternResult } from "../types";
+import type { Candle, PatternDefinition, PatternLine, PatternResult } from "../types";
 import { BASE_PRICE, MAX_PRICE, MIN_PRICE } from "../constants";
 import { clamp } from "../utils";
-import { ascendingTrianglePattern } from "./ascendingTriangle";
-import { descendingTrianglePattern } from "./descendingTriangle";
-import { headAndShouldersPattern } from "./headAndShoulders";
-import { reverseHeadAndShouldersPattern } from "./reverseHeadAndShoulders";
-import { cupAndHandlePattern } from "./cupAndHandle";
-import { inverseCupAndHandlePattern } from "./inverseCupAndHandle";
-import { bullFlagPattern } from "./bullFlag";
-import { bearFlagPattern } from "./bearFlag";
-import { bullPennantPattern } from "./bullPennant";
-import { bearPennantPattern } from "./bearPennant";
-import { doubleTopPattern } from "./doubleTop";
-import { doubleBottomPattern } from "./doubleBottom";
-import { ascendingWedgePattern } from "./ascendingWedge";
-import { descendingWedgePattern } from "./descendingWedge";
-import { ascendingBroadeningWedgePattern } from "./ascendingBroadeningWedge";
-import { descendingBroadeningWedgePattern } from "./descendingBroadeningWedge";
-import { bullRectanglePattern } from "./bullRectangle";
-import { bearRectanglePattern } from "./bearRectangle";
-import { diamondTopPattern } from "./diamondTop";
-import { diamondBottomPattern } from "./diamondBottom";
+import {
+  ascendingBroadeningWedgePattern,
+  ascendingTrianglePattern,
+  ascendingWedgePattern,
+  descendingBroadeningWedgePattern,
+  descendingTrianglePattern,
+  descendingWedgePattern,
+} from "./triangles";
+import { bearFlagPattern, bearPennantPattern, bearRectanglePattern, bullFlagPattern, bullPennantPattern, bullRectanglePattern } from "./continuations";
+import {
+  cupAndHandlePattern,
+  diamondBottomPattern,
+  diamondTopPattern,
+  doubleBottomPattern,
+  doubleTopPattern,
+  headAndShouldersPattern,
+  inverseCupAndHandlePattern,
+  reverseHeadAndShouldersPattern,
+} from "./reversals";
 import { rangePattern } from "./range";
-import { enhancePatternCandles } from "./realism";
 
 const rawPatterns: PatternDefinition[] = [
   ascendingTrianglePattern,
@@ -48,100 +46,54 @@ const rawPatterns: PatternDefinition[] = [
   rangePattern,
 ];
 
-const bullishPatternIds = new Set([
-  "ascending-triangle",
-  "descending-wedge",
-  "descending-broadening-wedge",
-  "reverse-head-and-shoulders",
-  "cup-and-handle",
-  "bull-flag",
-  "bull-rectangle",
-  "diamond-bottom",
-  "bull-pennant",
-  "double-bottom",
-]);
-
-const bearishPatternIds = new Set([
-  "descending-triangle",
-  "ascending-wedge",
-  "ascending-broadening-wedge",
-  "head-and-shoulders",
-  "inverse-cup-and-handle",
-  "bear-flag",
-  "bear-rectangle",
-  "diamond-top",
-  "bear-pennant",
-  "double-top",
-]);
-
-const getDirection = (patternId: string): PatternDirection => {
-  if (bullishPatternIds.has(patternId)) return "bullish";
-  if (bearishPatternIds.has(patternId)) return "bearish";
-  return "neutral";
-};
+// Safety net around the generators: a bad start price (NaN, out of range) or a value the
+// engine clips at the price limits must never reach the chart as an invalid candle.
 
 const safePatternStart = (startPrice: number) => {
-  const span = MAX_PRICE - MIN_PRICE;
-  const edgeMargin = Math.max(1, span * 0.01);
+  const edgeMargin = Math.max(1, (MAX_PRICE - MIN_PRICE) * 0.01);
   const fallback = clamp(BASE_PRICE, MIN_PRICE + edgeMargin, MAX_PRICE - edgeMargin);
   return clamp(Number.isFinite(startPrice) ? startPrice : fallback, MIN_PRICE + edgeMargin, MAX_PRICE - edgeMargin);
 };
 
 const safePrice = (value: number, fallback: number) => clamp(Number.isFinite(value) ? value : fallback, MIN_PRICE, MAX_PRICE);
 
-const normalizeCandle = (candle: Candle, fallbackPrice: number, patternId: string, index: number): Candle => {
-  const open = safePrice(candle.open, fallbackPrice);
-  const close = safePrice(candle.close, open);
-  const low = safePrice(candle.low, Math.min(open, close));
-  const high = safePrice(candle.high, Math.max(open, close));
-
-  return {
-    ...candle,
-    id: `${patternId}-${index}-${candle.id}`,
-    open,
-    close,
-    low: Math.min(low, open, close),
-    high: Math.max(high, open, close),
-  };
-};
-
-const normalizeLine = (line: PatternLine, candleCount: number, fallbackPrice: number): PatternLine => {
-  const maxOffset = Math.max(0, candleCount - 1);
-  const startOffset = clamp(Number.isFinite(line.startOffset) ? Math.round(line.startOffset) : 0, 0, maxOffset);
-  const endOffset = clamp(Number.isFinite(line.endOffset) ? Math.round(line.endOffset) : maxOffset, startOffset, maxOffset);
-
-  return {
-    ...line,
-    startOffset,
-    endOffset,
-    startPrice: safePrice(line.startPrice, fallbackPrice),
-    endPrice: safePrice(line.endPrice, fallbackPrice),
-  };
-};
-
-const normalizeResult = (result: PatternResult, startPrice: number, patternId: string): PatternResult => {
+const normalizeCandles = (candles: Candle[], startPrice: number) => {
   let previousClose = startPrice;
-  const realisticCandles = enhancePatternCandles(result.candles, startPrice);
-  const candles = realisticCandles.map((candle, index) => {
-    const normalized = normalizeCandle(candle, previousClose, patternId, index);
-    previousClose = normalized.close;
-    return normalized;
+  return candles.map((candle) => {
+    const open = safePrice(candle.open, previousClose);
+    const close = safePrice(candle.close, open);
+    const high = Math.max(safePrice(candle.high, Math.max(open, close)), open, close);
+    const low = Math.min(safePrice(candle.low, Math.min(open, close)), open, close);
+    previousClose = close;
+    return { ...candle, open, close, high, low };
   });
-  const fallbackTarget = candles.at(-1)?.close ?? startPrice;
+};
 
+const normalizeLine = (line: PatternLine, fallbackPrice: number): PatternLine => ({
+  ...line,
+  points: line.points.map((point) => ({ offset: Math.max(0, Math.round(point.offset)), price: safePrice(point.price, fallbackPrice) })),
+  revealOffset: Math.max(0, Math.round(line.revealOffset)),
+  extendBy: Math.max(0, Math.round(line.extendBy)),
+});
+
+const normalizeResult = (result: PatternResult, startPrice: number): PatternResult => {
+  const candles = normalizeCandles(result.candles, startPrice);
+  const formationEnd = candles.at(-1)?.close ?? startPrice;
+  const runout = normalizeCandles(result.runout, formationEnd);
   return {
     candles,
-    targetPrice: safePrice(result.targetPrice, fallbackTarget),
-    lines: result.lines?.map((line) => normalizeLine(line, candles.length, startPrice)),
+    runout,
+    targetPrice: safePrice(result.targetPrice, runout.at(-1)?.close ?? formationEnd),
+    breakoutPrice: safePrice(result.breakoutPrice, formationEnd),
+    lines: result.lines.filter((line) => line.points.length >= 2).map((line) => normalizeLine(line, startPrice)),
   };
 };
 
 const makeSafePattern = (pattern: PatternDefinition): PatternDefinition => ({
   ...pattern,
-  direction: getDirection(pattern.id),
   generate: (startPrice) => {
-    const normalizedStart = safePatternStart(startPrice);
-    return normalizeResult(pattern.generate(normalizedStart), normalizedStart, pattern.id);
+    const start = safePatternStart(startPrice);
+    return normalizeResult(pattern.generate(start), start);
   },
 });
 
@@ -171,12 +123,15 @@ export const choosePattern = (currentPrice: number, enabledIds?: string[], rando
     return null;
   }
 
+  const finitePrice = Number.isFinite(currentPrice) ? currentPrice : BASE_PRICE;
+  // Near the price ceiling a bullish pattern would get clipped; only let price fall from there.
+  const nearCeiling = finitePrice > MAX_PRICE * 0.85 && source.some((pattern) => pattern.bias !== "bullish");
+
   // Normalize each side independently because BASE_PRICE is intentionally not
   // the midpoint. At BASE_PRICE every pattern is equally likely; near either
   // price boundary, patterns pointing back toward the playable range gain weight.
   const spanDown = Math.max(1, BASE_PRICE - MIN_PRICE);
   const spanUp = Math.max(1, MAX_PRICE - BASE_PRICE);
-  const finitePrice = Number.isFinite(currentPrice) ? currentPrice : BASE_PRICE;
   const centered = clamp(
     finitePrice < BASE_PRICE ? (finitePrice - BASE_PRICE) / spanDown : (finitePrice - BASE_PRICE) / spanUp,
     -1,
@@ -184,8 +139,8 @@ export const choosePattern = (currentPrice: number, enabledIds?: string[], rando
   );
   const directionalBias = 0.8;
   const weights = source.map((pattern) => {
-    if (pattern.direction === "bullish") return 1 - directionalBias * centered;
-    if (pattern.direction === "bearish") return 1 + directionalBias * centered;
+    if (pattern.bias === "bullish") return nearCeiling ? 0 : 1 - directionalBias * centered;
+    if (pattern.bias === "bearish") return 1 + directionalBias * centered;
     return 1;
   });
 
