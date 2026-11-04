@@ -3,6 +3,7 @@ import { View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { UiButton, type ButtonVariant } from "./UiButton";
 import { UiPicker } from "./UiPicker";
+import { getTerminalPalette } from "../theme/terminal";
 
 export type BottomControlsProps = {
   darkMode: boolean;
@@ -56,6 +57,7 @@ export function BottomControls({
   disabled = false,
   styles,
 }: BottomControlsProps) {
+  const palette = getTerminalPalette(darkMode);
   const disableNonClose = disabled || overtime;
   const showCloseOnly = overtime && hasPositions;
 
@@ -75,7 +77,7 @@ export function BottomControls({
             onPress={toggleUseLeverage}
             disabled={disabled || overtime}
             variant="borderedProminent"
-            color={useLeverage ? "#d94b4b" : "#1a9f7a"}
+            color={useLeverage ? palette.red : palette.green}
             style={styles.wagerModeButtonControl}
             darkMode={darkMode}
           />
@@ -100,9 +102,9 @@ export function BottomControls({
             onPress={onSell}
             disabled={disabled || !hasPositions}
             variant={majorVariant}
-            color="#d94b4b"
+            color={palette.red}
             controlSize="large"
-            style={[styles.tradeButton]}
+            style={styles.tradeButton}
             darkMode={darkMode}
           />
         ) : useLeverage ? (
@@ -112,9 +114,9 @@ export function BottomControls({
               onPress={onSell}
               disabled={disabled || !hasPositions}
               variant={majorVariant}
-              color="#d94b4b"
+              color={palette.red}
               controlSize="large"
-              style={[styles.tradeButton]}
+              style={styles.tradeButton}
               darkMode={darkMode}
             />
           ) : (
@@ -124,7 +126,7 @@ export function BottomControls({
                 onPress={() => onBuy("long")}
                 disabled={disableNonClose || !canBuy || !canOpenLong}
                 variant={majorVariant}
-                color="#1a9f7a"
+                color={palette.green}
                 controlSize="large"
                 style={[styles.tradeButton, styles.buyButton, (disableNonClose || !canBuy || !canOpenLong) && styles.buyButtonDisabled]}
                 darkMode={darkMode}
@@ -134,7 +136,7 @@ export function BottomControls({
                 onPress={() => onBuy("short")}
                 disabled={disableNonClose || !canBuy || !canOpenShort}
                 variant={majorVariant}
-                color="#f5a524"
+                color={palette.red}
                 controlSize="large"
                 style={[styles.tradeButton, styles.shortButton, (disableNonClose || !canBuy || !canOpenShort) && styles.shortButtonDisabled]}
                 darkMode={darkMode}
@@ -148,7 +150,7 @@ export function BottomControls({
               onPress={() => onBuy("long")}
               disabled={disableNonClose || !canBuy}
               variant={majorVariant}
-              color="#1a9f7a"
+              color={palette.green}
               controlSize="large"
               style={[styles.tradeButton, styles.buyButton, (disableNonClose || !canBuy) && styles.buyButtonDisabled]}
               darkMode={darkMode}
@@ -158,7 +160,7 @@ export function BottomControls({
               onPress={onSell}
               disabled={disabled || !hasPositions}
               variant={majorVariant}
-              color="#d94b4b"
+              color={palette.red}
               controlSize="large"
               style={[styles.tradeButton, styles.sellButton, (disabled || !hasPositions) && styles.sellButtonDisabled]}
               darkMode={darkMode}

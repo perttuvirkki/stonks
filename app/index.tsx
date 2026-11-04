@@ -1,8 +1,27 @@
 import { memo, type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Alert, BackHandler, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
-import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeInLeft,
+  FadeInRight,
+  FadeOut,
+  FadeOutLeft,
+  FadeOutRight,
+  ReduceMotion,
+  cancelAnimation,
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 import * as SplashScreen from "expo-splash-screen";
@@ -12,6 +31,7 @@ import { CHART_SCRIPT } from "../src/chartScript";
 import { BottomControls } from "../src/components/BottomControls";
 import { AnimatedSplash } from "../src/components/AnimatedSplash";
 import { MarginCallOverlay, type MarginCallVariant } from "../src/components/MarginCallOverlay";
+import { EmojiText } from "../src/components/Twemoji";
 import { PatternSettingsModal } from "../src/components/PatternSettingsModal";
 import { ProFeaturesModal } from "../src/components/ProFeaturesModal";
 import { TopScoreModal } from "../src/components/TopScoreModal";
@@ -20,8 +40,18 @@ import { ProfitToast } from "../src/components/ProfitToast";
 import { RoundResultsSheet, type RoundResult, type RoundStats } from "../src/components/RoundResultsSheet";
 import { StackBar, type ChartType } from "../src/components/StackBar";
 import { RocketBurst } from "../src/components/RocketBurst";
+import {
+  EMPTY_QUIZ_SCORE,
+  PopQuizCard,
+  PopQuizScoreTag,
+  isQuizAnswerCorrect,
+  type QuizPrompt,
+  type QuizScore,
+  type QuizSide,
+} from "../src/components/PopQuizCard";
 import { RevenueCatProvider, useRevenueCat } from "../src/contexts/RevenueCatContext";
 import { useGameStore } from "../src/stores/useGameStore";
+import { getDailyMoneyQuote } from "../src/data/dailyMoneyQuotes";
 import TwemojiRocket from "../assets/twemoji/1f680.svg";
 import TwemojiTrophy from "../assets/twemoji/1f3c6.svg";
 import TwemojiBarChart from "../assets/twemoji/1f4ca.svg";
@@ -40,6 +70,8 @@ import TwemojiHotFace from "../assets/twemoji/1f975.svg";
 import TwemojiSkull from "../assets/twemoji/1f480.svg";
 import type { ButtonVariant } from "../src/components/UiButton";
 import { UiButton } from "../src/components/UiButton";
+import { getReadableTextOn } from "../src/components/uiColors";
+import { TERMINAL_DARK, TERMINAL_FONT, TERMINAL_LIGHT, getTerminalPalette } from "../src/theme/terminal";
 import { allPatterns, choosePattern } from "../src/patterns";
 import type { Candle } from "../src/types";
 import { createCandle, createTargetRunout } from "../src/utils";
@@ -78,12 +110,17 @@ type TradeToast = {
 };
 
 type LaunchScreen = "menu" | "dailyQuote" | "settings" | "game";
-type GameMode = "sprint60" | "fiveTrades" | "training";
+type NavigationDirection = "initial" | "forward" | "back";
+type GameMode = "sprint60" | "fiveTrades" | "training" | "quiz";
 
 const CHART_BOTTOM_INSET = 110;
 const TOP_SHEET_OFFSET = -240;
 const TRADE_SHEET_DETENTS = [0.18];
 const TRADE_BAR_GAP = 12;
+const LAUNCH_MENU_HEADER_HEIGHT = 44;
+const QUOTE_ROLL_WIDTH = 16;
+// The reveal starts this far left of the paper so its drop shadow is hidden too.
+const QUOTE_ROLL_START_X = -14;
 const LEVERAGE_OPTIONS = [
   { percent: 0.25, leverage: 5 },
   { percent: 0.5, leverage: 10 },
@@ -95,11 +132,6 @@ const ROUND_DURATION_MS = 60_000;
 const ROUND_END_SLOW_TICK_MS = 300;
 const ROUND_END_SHEET_DELAY_MS = 900;
 const FIVE_TRADES_TARGET = 5;
-type DailyMoneyQuote = {
-  text: string;
-  author: string;
-};
-
 type SettingsRow = {
   id: string;
   label: string;
@@ -114,29 +146,11 @@ type SettingsSection = {
   rows: SettingsRow[];
 };
 
-const DAILY_MONEY_QUOTES: DailyMoneyQuote[] = [
-  { text: "The stock market is a device for transferring money from the impatient to the patient.", author: "Warren Buffett" },
-  { text: "Risk comes from not knowing what you are doing.", author: "Warren Buffett" },
-  { text: "Know what you own, and know why you own it.", author: "Peter Lynch" },
-  { text: "The four most dangerous words in investing are: this time it's different.", author: "Sir John Templeton" },
-  { text: "Price is what you pay. Value is what you get.", author: "Warren Buffett" },
-  { text: "In investing, what is comfortable is rarely profitable.", author: "Robert Arnott" },
-  { text: "An investment in knowledge pays the best interest.", author: "Benjamin Franklin" },
-  { text: "The individual investor should act consistently as an investor and not as a speculator.", author: "Ben Graham" },
-];
-
 type ChartSpeedMs = 100 | 125 | 150 | 175 | 200;
 
 // Estimate used for UI messaging (pattern length + typical resolve/spawn overhead).
 const ESTIMATED_CANDLES_PER_PATTERN_CYCLE = 117;
 const SPEED_HINT_DURATION_MS = 1600;
-
-const getDailyMoneyQuote = () => {
-  const now = new Date();
-  const startOfYear = new Date(now.getFullYear(), 0, 0);
-  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / 86_400_000);
-  return DAILY_MONEY_QUOTES[Math.abs(dayOfYear) % DAILY_MONEY_QUOTES.length] ?? DAILY_MONEY_QUOTES[0];
-};
 
 const getLocalDayKey = (date = new Date()) => {
   const year = date.getFullYear();
@@ -153,7 +167,7 @@ const CHART_HTML = [
   '    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />',
   "    <style>",
   "      html, body { width: 100%; height: 100%; margin: 0; padding: 0; }",
-  "      body { background: #ffffff; font-family: Arial, sans-serif; overflow: hidden; }",
+  "      body { background: #f7f6f2; font-family: Menlo, Consolas, 'Courier New', monospace; overflow: hidden; }",
   `      #chart { position: absolute; top: 0; left: 0; right: 0; bottom: ${CHART_BOTTOM_INSET}px; }`,
   "      #overlay {",
   "        position: absolute;",
@@ -1215,6 +1229,7 @@ const INJECTED_CHART_SCRIPT = `
             layout: {
               background: { color: theme.background || "#ffffff" },
               textColor: theme.textColor || "#333333",
+              fontFamily: theme.fontFamily || undefined,
             },
             grid: {
               vertLines: { color: theme.gridColor || "#f0f0f0" },
@@ -1232,6 +1247,9 @@ const INJECTED_CHART_SCRIPT = `
         }
         if (overlay) {
           overlay.style.color = theme.overlayColor || theme.textColor || "#888888";
+          if (theme.fontFamily) {
+            overlay.style.fontFamily = theme.fontFamily;
+          }
         }
       } catch (err) {
         post({ type: "error", message: "theme:" + String(err && err.message ? err.message : err) });
@@ -1338,6 +1356,7 @@ const INJECTED_CHART_SCRIPT = `
 
 function AppContent() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { isPro: isProReal, proPrice, purchasePro, restorePurchases, isLoading: isRevenueCatLoading } = useRevenueCat();
   const [debugProOverride, setDebugProOverride] = useState(false);
   const isPro = isProReal || debugProOverride; // Debug override for testing
@@ -1362,11 +1381,19 @@ function AppContent() {
   // Show our custom splash immediately so Android doesn't briefly flash the game UI before the animation.
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
   const [launchScreen, setLaunchScreen] = useState<LaunchScreen>("menu");
+  const [navigationDirection, setNavigationDirection] = useState<NavigationDirection>("initial");
+  const isScreenTransitioningRef = useRef(false);
+  const screenTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gameMode, setGameMode] = useState<GameMode>("sprint60");
   const gameModeRef = useRef<GameMode>("sprint60");
   const [isRoundActive, setIsRoundActive] = useState(false);
   const [roundTradesMade, setRoundTradesMade] = useState(0);
   const dailyMoneyQuote = useMemo(() => getDailyMoneyQuote(), []);
+  const isNarrowScreen = windowWidth < 380;
+  const isCompactHeight = windowHeight < 760;
+  const launchMenuButtonMinHeight = Math.max(96, (windowHeight - insets.top - insets.bottom - LAUNCH_MENU_HEADER_HEIGHT) / 6);
+  const dailyQuoteFontSize = dailyMoneyQuote.text.length > 300 ? 14 : dailyMoneyQuote.text.length > 200 ? 17 : dailyMoneyQuote.text.length > 140 ? 21 : dailyMoneyQuote.text.length > 90 ? 25 : dailyMoneyQuote.text.length > 65 ? 29 : isNarrowScreen ? 31 : 35;
+  const dailyQuoteLineHeight = Math.round(dailyQuoteFontSize * 1.2);
   const dailyMoneyDateLine = useMemo(
     () => new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }).toUpperCase(),
     []
@@ -1439,7 +1466,11 @@ function AppContent() {
     isOvertimeRef.current = isOvertime;
   }, [isOvertime]);
   const [useLeverage, setUseLeverage] = useState(true);
-  const darkMode = useGameStore((state) => state.darkMode);
+  const darkModePreference = useGameStore((state) => state.darkMode);
+  // Dark terminal is a Pro feature: a lapsed or restored-on-another-device
+  // preference never applies without Pro.
+  const darkMode = isPro && darkModePreference;
+  const terminal = getTerminalPalette(darkMode);
   const setDarkMode = useGameStore((state) => state.setDarkMode);
   const [leverageIndex, setLeverageIndex] = useState(1);
   const [tradeToast, setTradeToast] = useState<TradeToast | null>(null);
@@ -1452,15 +1483,75 @@ function AppContent() {
   const [overtimeBannerLayout, setOvertimeBannerLayout] = useState({ width: 0, height: 0 });
   const [showPatternLines, setShowPatternLines] = useState(false);
   const showPatternLinesRef = useRef(false);
+  // Pop Quiz: the chart halts when a pattern finishes forming and asks long or short.
+  const [quizPrompt, setQuizPrompt] = useState<QuizPrompt | null>(null);
+  const [quizScore, setQuizScore] = useState<QuizScore>(EMPTY_QUIZ_SCORE);
+  const quizPendingRef = useRef<Omit<QuizPrompt, "answer"> | null>(null);
+  const quizPausedRef = useRef(false);
+  const quizRevealLinesRef = useRef(false);
+  const quizIdRef = useRef(0);
   const [rocketBurstTrigger, setRocketBurstTrigger] = useState(0);
   const [moneyPrinterTrigger, setMoneyPrinterTrigger] = useState(0);
   const toastTranslateY = useSharedValue(TOP_SHEET_OFFSET);
   const quoteCashDropProgress = useSharedValue(0);
+  const quotePaperProgress = useSharedValue(1);
+  const quoteHeadlineProgress = useSharedValue(1);
+  const quoteBylineProgress = useSharedValue(1);
+  const quotePaperShake = useSharedValue(0);
+  const quotePaperWidth = useSharedValue(0);
+  const quoteStackFlash = useSharedValue(0);
+  const quoteCursorOpacity = useSharedValue(1);
+  const [quoteStackDisplay, setQuoteStackDisplay] = useState<number | null>(null);
+  const quoteStackCountFrameRef = useRef<number | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTradeLabelRef = useRef<string>("Trade");
   const [isProFeaturesVisible, setIsProFeaturesVisible] = useState(false);
   const didTryReviewPromptRef = useRef(false);
+
+  const navigateTo = useCallback(
+    (nextScreen: LaunchScreen, direction: Exclude<NavigationDirection, "initial">) => {
+      if (nextScreen === launchScreen || isScreenTransitioningRef.current) {
+        return false;
+      }
+
+      isScreenTransitioningRef.current = true;
+      setNavigationDirection(direction);
+      setLaunchScreen(nextScreen);
+
+      if (screenTransitionTimeoutRef.current) {
+        clearTimeout(screenTransitionTimeoutRef.current);
+      }
+      screenTransitionTimeoutRef.current = setTimeout(() => {
+        isScreenTransitioningRef.current = false;
+        screenTransitionTimeoutRef.current = null;
+      }, 300);
+      return true;
+    },
+    [launchScreen],
+  );
+
+  const screenEntering = useMemo(() => {
+    const animation =
+      navigationDirection === "forward" ? FadeInRight : navigationDirection === "back" ? FadeInLeft : FadeIn;
+    return animation.duration(navigationDirection === "initial" ? 180 : 260).easing(Easing.out(Easing.cubic)).reduceMotion(ReduceMotion.System);
+  }, [navigationDirection]);
+
+  // Every secondary screen is a child of the menu, so its only exit is a back transition.
+  // Keeping the exit animation tied to the current screen also lets Reanimated finish it after unmount.
+  const screenExiting = useMemo(() => {
+    const animation = launchScreen === "menu" ? FadeOutLeft : FadeOutRight;
+    return animation.duration(200).easing(Easing.in(Easing.cubic)).reduceMotion(ReduceMotion.System);
+  }, [launchScreen]);
+
+  useEffect(
+    () => () => {
+      if (screenTransitionTimeoutRef.current) {
+        clearTimeout(screenTransitionTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   const quoteCashDropStyle1 = useAnimatedStyle(() => {
     const raw = quoteCashDropProgress.value / 0.78;
@@ -1500,6 +1591,82 @@ function AppContent() {
       transform: [{ translateY: -108 + p * 108 }, { translateX: 24 * (1 - p) }, { scale: 0.82 + p * 0.18 }],
     };
   });
+
+  const quotePaperStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: 3 * quotePaperShake.value }],
+  }));
+
+  // Roll-open reveal: a background-coloured cover slides off to the right (hiding the paper and
+  // its shadow) while a paper roll rides its left edge.
+  const quotePaperCoverStyle = useAnimatedStyle(() => {
+    const p = quotePaperProgress.value;
+    return {
+      opacity: p >= 1 ? 0 : 1,
+      transform: [{ translateX: QUOTE_ROLL_START_X + p * (quotePaperWidth.value - QUOTE_ROLL_START_X) }],
+    };
+  });
+
+  const quotePaperRollStyle = useAnimatedStyle(() => {
+    const p = quotePaperProgress.value;
+    const fadeOut = p > 0.85 ? Math.max(0, (1 - p) / 0.15) : 1;
+    return {
+      opacity: fadeOut,
+      transform: [
+        { translateX: QUOTE_ROLL_START_X + p * (quotePaperWidth.value - QUOTE_ROLL_START_X) - QUOTE_ROLL_WIDTH / 2 },
+        { scaleX: 0.4 + 0.6 * fadeOut },
+      ],
+    };
+  });
+
+  const quoteHeadlineStyle = useAnimatedStyle(() => ({
+    opacity: quoteHeadlineProgress.value,
+    transform: [{ translateY: 10 * (1 - quoteHeadlineProgress.value) }],
+  }));
+
+  const quoteBylineStyle = useAnimatedStyle(() => ({
+    opacity: quoteBylineProgress.value,
+    transform: [{ translateY: 6 * (1 - quoteBylineProgress.value) }],
+  }));
+
+  const quoteStackValueStyle = useAnimatedStyle(() => ({
+    color: interpolateColor(quoteStackFlash.value, [0, 1], [terminal.text, terminal.green]),
+  }));
+
+  const quoteCursorStyle = useAnimatedStyle(() => ({
+    opacity: quoteCursorOpacity.value,
+  }));
+
+  // Daily Quote juice: the paper rolls open from the left, then the headline and byline reveal.
+  useEffect(() => {
+    if (launchScreen !== "dailyQuote") {
+      cancelAnimation(quoteCursorOpacity);
+      return;
+    }
+    quotePaperProgress.value = 0;
+    quoteHeadlineProgress.value = 0;
+    quoteBylineProgress.value = 0;
+    quotePaperShake.value = 0;
+    quoteStackFlash.value = 0;
+    quotePaperProgress.value = withDelay(120, withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) }));
+    quoteHeadlineProgress.value = withDelay(620, withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) }));
+    quoteBylineProgress.value = withDelay(770, withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) }));
+    quoteCursorOpacity.value = 1;
+    quoteCursorOpacity.value = withRepeat(
+      withSequence(withDelay(530, withTiming(0, { duration: 0 })), withDelay(530, withTiming(1, { duration: 0 }))),
+      -1,
+    );
+    // Only re-run when the screen is entered, not when the claim state changes mid-screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launchScreen]);
+
+  useEffect(
+    () => () => {
+      if (quoteStackCountFrameRef.current != null) {
+        cancelAnimationFrame(quoteStackCountFrameRef.current);
+      }
+    },
+    [],
+  );
 
   const formatPatternsPerMinute = useCallback((ms: number): string => {
     const ppm = 60_000 / (ms * ESTIMATED_CANDLES_PER_PATTERN_CYCLE);
@@ -1711,6 +1878,7 @@ function AppContent() {
     // Record lifetime stats (only for real rounds, not training wheels)
     if (!showPatternLinesRef.current) {
       recordRoundEnd({
+        tradesMade: roundStatsRef.current.tradesMade,
         tradesWon: roundStatsRef.current.tradesWon,
         tradesLost: roundStatsRef.current.tradesLost,
         profitAmount: profit,
@@ -1956,13 +2124,14 @@ function AppContent() {
 
   const chartTheme = useMemo(
     () => ({
-      background: darkMode ? "#0d0f12" : "#ffffff",
-      textColor: darkMode ? "#e6e6e6" : "#333333",
-      gridColor: darkMode ? "#1f2329" : "#f0f0f0",
-      borderColor: darkMode ? "#2b2f35" : "#dddddd",
-      overlayColor: darkMode ? "#8b9098" : "#888888",
+      background: terminal.bg,
+      textColor: darkMode ? terminal.amber : terminal.textDim,
+      gridColor: darkMode ? "#1a1a1a" : "#e6e4dc",
+      borderColor: terminal.borderStrong,
+      overlayColor: terminal.textDim,
+      fontFamily: TERMINAL_FONT,
     }),
-    [darkMode],
+    [darkMode, terminal],
   );
   const getLiquidationPrice = () => {
     const positions = positionsRef.current;
@@ -2127,8 +2296,8 @@ function AppContent() {
       },
       {
         id: "darkMode",
-        label: darkMode ? "Disable Dark Mode" : "Enable Dark Mode",
-        subtitle: isPro ? "Toggle your preferred app theme." : "Unlock Pro to use dark mode.",
+        label: darkMode ? "Light Terminal" : "Dark Terminal",
+        subtitle: isPro ? "Switch between the light and dark terminal." : "Dark terminal is a Pro feature.",
         icon: TwemojiMoon,
         onPress: () => {
           if (!isPro) {
@@ -2186,7 +2355,7 @@ function AppContent() {
   }, [darkMode, debugProOverride, isPro, proPrice, restorePurchases, setDarkMode]);
 
   const openSettings = () => {
-    setLaunchScreen("settings");
+    navigateTo("settings", "forward");
   };
 
   const pickMarginCallVariant = (): MarginCallVariant => {
@@ -2244,6 +2413,10 @@ function AppContent() {
     targetQueueRef.current = [];
     hasSpawnedPattern.current = false;
     patternLinesRef.current = [];
+    quizPendingRef.current = null;
+    quizPausedRef.current = false;
+    quizRevealLinesRef.current = false;
+    setQuizPrompt(null);
 
     candleIndexRef.current = 0;
     baseTimeRef.current = null;
@@ -2400,8 +2573,8 @@ function AppContent() {
     const firstIndex = candles[0]?.index ?? 0;
     const baseTime = baseTimeRef.current ?? Math.floor(Date.now() / 1000) - lastIndex * 60;
 
-    // Only include pattern lines if training wheels is enabled
-    const lines = showPatternLinesRef.current
+    // Only include pattern lines if training wheels is enabled or a Pop Quiz answer was revealed
+    const lines = showPatternLinesRef.current || quizRevealLinesRef.current
       ? patternLinesRef.current.map((line) => ({
           id: line.id,
           kind: line.kind,
@@ -2532,20 +2705,39 @@ function AppContent() {
     return () => clearTimeout(retry);
   }, [isMarginCallVisible]);
 
+  // Pop Quiz only asks about patterns with a direction; Range has no right answer.
+  const getQuizPatternIds = () => {
+    const directional = allPatterns.filter((pattern) => pattern.direction !== "neutral").map((pattern) => pattern.id);
+    const enabled = directional.filter((id) => enabledPatternIdsRef.current.includes(id));
+    return enabled.length > 0 ? enabled : directional;
+  };
+
   useEffect(() => {
     if (launchScreen !== "game") {
       return;
     }
     const timer = setInterval(() => {
+      if (quizPausedRef.current) {
+        return;
+      }
       const candles = candlesRef.current;
       const lastClose = candles.length ? candles[candles.length - 1].close : BASE_PRICE;
       let shouldUpdateLines = false;
       if (patternQueueRef.current.length === 0 && targetQueueRef.current.length === 0) {
         if (!hasSpawnedPattern.current || Math.random() < PATTERN_SPAWN_CHANCE) {
           const isTraining = showPatternLinesRef.current;
-          const enabledIds = isTraining ? enabledPatternIdsRef.current : undefined;
+          const isQuiz = gameModeRef.current === "quiz";
+          const enabledIds = isQuiz ? getQuizPatternIds() : isTraining ? enabledPatternIdsRef.current : undefined;
           const pattern = choosePattern(lastClose, enabledIds);
           setCurrentPatternLabel(pattern?.label ?? null);
+          if (isQuiz) {
+            quizRevealLinesRef.current = false;
+            quizIdRef.current += 1;
+            quizPendingRef.current =
+              pattern?.direction && pattern.direction !== "neutral"
+                ? { id: quizIdRef.current, patternLabel: pattern.label, direction: pattern.direction }
+                : null;
+          }
           if (pattern) {
             const result = pattern.generate(lastClose);
             patternQueueRef.current = result.candles;
@@ -2583,6 +2775,14 @@ function AppContent() {
       if (patternQueueRef.current.length > 0) {
         nextBase = patternQueueRef.current[0];
         patternQueueRef.current = patternQueueRef.current.slice(1);
+        if (patternQueueRef.current.length === 0 && quizPendingRef.current) {
+          // Last candle of the pattern: halt before the breakout and ask.
+          const pending = quizPendingRef.current;
+          quizPendingRef.current = null;
+          quizPausedRef.current = true;
+          setQuizPrompt({ ...pending, answer: null });
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        }
       } else if (targetQueueRef.current.length > 0) {
         nextBase = targetQueueRef.current[0];
         targetQueueRef.current = targetQueueRef.current.slice(1);
@@ -2630,9 +2830,9 @@ function AppContent() {
             roundStatsRef.current.closestToLiquidation = 0; // Liquidated = 0%
             // Capture the leverage of the first position for liquidation stats
             const liquidatedLeverage = positionsRef.current[0]?.leverage ?? 0;
-            // Count all liquidated positions as trades lost
-            const liquidatedPositionCount = positionsRef.current.length;
-            roundStatsRef.current.tradesLost += liquidatedPositionCount;
+            // A position stack is opened and closed as one aggregate trade.
+            roundStatsRef.current.tradesMade += 1;
+            roundStatsRef.current.tradesLost += 1;
 
             // Capture stats BEFORE resetRoundState resets them
             const capturedStats = { ...roundStatsRef.current };
@@ -2657,6 +2857,7 @@ function AppContent() {
               // Record liquidation in lifetime stats (only for real rounds, not training wheels)
               if (!showPatternLinesRef.current) {
                 recordRoundEnd({
+                  tradesMade: capturedStats.tradesMade,
                   tradesWon: capturedStats.tradesWon,
                   tradesLost: capturedStats.tradesLost,
                   profitAmount: -margin,
@@ -2753,9 +2954,13 @@ function AppContent() {
   const shouldShowInGameBanner = (showStartHint || showSpeedHint || showOvertimeHint) && !isInGameBannerDismissed;
   const isTrainingMode = gameMode === "training";
   const isFiveTradesMode = gameMode === "fiveTrades";
-  const modeLabel = isFiveTradesMode ? "5 Trades" : isTrainingMode ? "Training Wheels" : "60s Sprint";
+  const isQuizMode = gameMode === "quiz";
+  const modeLabel = isFiveTradesMode ? "5 Trades" : isTrainingMode ? "Training Wheels" : isQuizMode ? "Pop Quiz" : "60s Sprint";
 
   const launchGameMode = (mode: GameMode) => {
+    if (isScreenTransitioningRef.current) {
+      return;
+    }
     setShowStartHint(false);
     setShowSpeedHint(false);
     const enableTraining = mode === "training";
@@ -2764,11 +2969,43 @@ function AppContent() {
     setGameMode(mode);
     gameModeRef.current = mode;
     roundModeRef.current = mode;
+    if (mode === "quiz") {
+      setQuizScore(EMPTY_QUIZ_SCORE);
+    }
     resetRun();
-    setLaunchScreen("game");
+    navigateTo("game", "forward");
+  };
+
+  const answerQuiz = (side: QuizSide) => {
+    if (!quizPrompt || quizPrompt.answer) {
+      return;
+    }
+    const correct = isQuizAnswerCorrect(quizPrompt, side);
+    setQuizPrompt({ ...quizPrompt, answer: side });
+    setQuizScore((prev) => {
+      const streak = correct ? prev.streak + 1 : 0;
+      return {
+        correct: prev.correct + (correct ? 1 : 0),
+        total: prev.total + 1,
+        streak,
+        bestStreak: Math.max(prev.bestStreak, streak),
+      };
+    });
+    Haptics.notificationAsync(correct ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error).catch(() => {});
+    // Show the trendlines so the player can see what they just missed (or nailed).
+    quizRevealLinesRef.current = true;
+    sendPatternLines();
+  };
+
+  const resumeQuizMarket = () => {
+    setQuizPrompt(null);
+    quizPausedRef.current = false;
   };
 
   const openMenuScreen = () => {
+    if (isScreenTransitioningRef.current) {
+      return;
+    }
     setShowStartHint(false);
     setShowSpeedHint(false);
     setIsPatternSettingsVisible(false);
@@ -2778,8 +3015,20 @@ function AppContent() {
     setIsRoundResultsVisible(false);
     setIsMarginCallVisible(false);
     resetRun();
-    setLaunchScreen("menu");
+    navigateTo("menu", "back");
   };
+
+  useEffect(() => {
+    if (launchScreen === "menu") {
+      return undefined;
+    }
+
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      openMenuScreen();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [launchScreen]);
 
   const handleClaimDailyQuoteBonus = () => {
     if (!canClaimDailyQuote) {
@@ -2799,6 +3048,43 @@ function AppContent() {
       duration: 1000,
       easing: Easing.out(Easing.cubic),
     });
+
+    // Small paper bump on Lock In.
+    quotePaperShake.value = withSequence(
+      withTiming(1, { duration: 50 }),
+      withTiming(-1, { duration: 60 }),
+      withTiming(0, { duration: 50 }),
+    );
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {
+      // Ignore.
+    });
+
+    // Count the stack value up from old to new with a green flash.
+    const fromStack = initialStackBalance;
+    const toStack = initialStackBalance + baseBonus;
+    const COUNT_MS = 600;
+    const countStart = Date.now();
+    if (quoteStackCountFrameRef.current != null) {
+      cancelAnimationFrame(quoteStackCountFrameRef.current);
+    }
+    setQuoteStackDisplay(fromStack);
+    const tickCount = () => {
+      const t = Math.min(1, (Date.now() - countStart) / COUNT_MS);
+      const eased = 1 - Math.pow(1 - t, 3);
+      if (t < 1) {
+        setQuoteStackDisplay(fromStack + (toStack - fromStack) * eased);
+        quoteStackCountFrameRef.current = requestAnimationFrame(tickCount);
+      } else {
+        quoteStackCountFrameRef.current = null;
+        setQuoteStackDisplay(null);
+      }
+    };
+    quoteStackCountFrameRef.current = requestAnimationFrame(tickCount);
+    quoteStackFlash.value = withSequence(
+      withTiming(1, { duration: 90 }),
+      withDelay(COUNT_MS, withTiming(0, { duration: 320 })),
+    );
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
       // Ignore.
     });
@@ -2810,45 +3096,111 @@ function AppContent() {
     setShowSpeedHint(false);
   };
 
+  const launchMenuItems: {
+    id: string;
+    title: string;
+    subtitle: string;
+    accent: string;
+    accessibilityLabel?: string;
+    onPress: () => void;
+  }[] = [
+    {
+      id: "dailyQuote",
+      title: "Daily Quote",
+      subtitle: "A money quote for today",
+      accent: terminal.amber,
+      onPress: () => navigateTo("dailyQuote", "forward"),
+    },
+    {
+      id: "sprint60",
+      title: "60 Second Game",
+      subtitle: "Current sprint mode",
+      accent: terminal.green,
+      onPress: () => launchGameMode("sprint60"),
+    },
+    {
+      id: "fiveTrades",
+      title: "5 Trades, Your Pace",
+      subtitle: "5 closes and the run ends",
+      accent: terminal.blue,
+      onPress: () => launchGameMode("fiveTrades"),
+    },
+    {
+      id: "training",
+      title: "Training Wheels",
+      subtitle: "Pattern guide mode",
+      accent: terminal.yellow,
+      onPress: () => launchGameMode("training"),
+    },
+    {
+      id: "quiz",
+      title: "Pop Quiz",
+      subtitle: "Chart freezes, you call long or short",
+      accent: terminal.blue,
+      onPress: () => launchGameMode("quiz"),
+    },
+    {
+      id: "pro",
+      title: isPro ? "Pro Active" : "Buy Pro",
+      subtitle: isPro ? "Thanks for supporting" : proPrice ? `Unlock all features (${proPrice})` : "Unlock all features",
+      accent: terminal.red,
+      onPress: () => {
+        if (isPro) {
+          return;
+        }
+        setIsProFeaturesVisible(true);
+      },
+    },
+    {
+      id: "settings",
+      title: "Settings",
+      subtitle: "Stats, leaderboards, and app options",
+      accent: terminal.textDim,
+      onPress: openSettings,
+    },
+  ];
+
   if (launchScreen === "menu") {
     return (
       <>
-        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
+        <Animated.View key="menu" entering={screenEntering} exiting={screenExiting} style={styles.screenTransition}>
+          <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, { backgroundColor: terminal.bg }]}>
           <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
-          <View style={styles.launchMenu}>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonQuote]} onPress={() => setLaunchScreen("dailyQuote")}>
-              <Text style={styles.launchMenuTitle}>Daily Quote</Text>
-              <Text style={styles.launchMenuSubtitle}>A money quote for today</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonSprint]} onPress={() => launchGameMode("sprint60")}>
-              <Text style={styles.launchMenuTitle}>60 Second Game</Text>
-              <Text style={styles.launchMenuSubtitle}>Current sprint mode</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonFive]} onPress={() => launchGameMode("fiveTrades")}>
-              <Text style={styles.launchMenuTitle}>5 Trades, Your Pace</Text>
-              <Text style={styles.launchMenuSubtitle}>5 closes and the run ends</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonTraining]} onPress={() => launchGameMode("training")}>
-              <Text style={styles.launchMenuTitle}>Training Wheels</Text>
-              <Text style={styles.launchMenuSubtitle}>Pattern guide mode</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.launchMenuButton, styles.launchMenuButtonPro]}
-              onPress={() => {
-                if (isPro) {
-                  return;
-                }
-                setIsProFeaturesVisible(true);
-              }}
-            >
-              <Text style={styles.launchMenuTitle}>{isPro ? "Pro Active" : "Buy Pro"}</Text>
-              <Text style={styles.launchMenuSubtitle}>{isPro ? "Thanks for supporting" : proPrice ? `Unlock all features (${proPrice})` : "Unlock all features"}</Text>
-            </Pressable>
-            <Pressable style={[styles.launchMenuButton, styles.launchMenuButtonSettings]} onPress={openSettings}>
-              <Text style={styles.launchMenuTitle}>Settings</Text>
-              <Text style={styles.launchMenuSubtitle}>Stats, leaderboards, and app options</Text>
-            </Pressable>
+          <View style={[styles.terminalHeader, { backgroundColor: terminal.header }]}>
+            <Text style={[styles.terminalHeaderBrand, { color: terminal.headerText }]}>STONKS</Text>
+            <Text style={[styles.terminalHeaderMeta, { color: terminal.headerText }]}>{isPro ? "PRO" : "MAIN"} MENU &lt;GO&gt;</Text>
           </View>
+          <ScrollView style={styles.launchMenu} contentContainerStyle={styles.launchMenuContent} bounces={false} showsVerticalScrollIndicator={false}>
+            {launchMenuItems.map((item, index) => (
+              <Pressable
+                key={item.id}
+                accessibilityLabel={item.accessibilityLabel}
+                onPress={item.onPress}
+                style={({ pressed }) => [
+                  styles.launchMenuButton,
+                  { minHeight: launchMenuButtonMinHeight, borderBottomColor: terminal.border },
+                  pressed && { backgroundColor: terminal.panelAlt },
+                ]}
+              >
+                <View style={[styles.launchMenuCode, { backgroundColor: item.accent }]}>
+                  <Text style={[styles.launchMenuCodeText, { color: getReadableTextOn(item.accent) }]}>{index + 1}</Text>
+                </View>
+                <View style={styles.launchMenuTextWrap}>
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    style={[styles.launchMenuTitle, isNarrowScreen && styles.launchMenuTitleCompact, { color: terminal.text }]}
+                  >
+                    {item.title}
+                  </Text>
+                  <Text numberOfLines={1} style={[styles.launchMenuSubtitle, { color: terminal.textDim }]}>
+                    {item.subtitle}
+                  </Text>
+                </View>
+                <Text style={[styles.launchMenuGo, { color: item.accent }]}>&lt;GO&gt;</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
           <ProFeaturesModal
             visible={isProFeaturesVisible}
             darkMode={darkMode}
@@ -2857,88 +3209,168 @@ function AppContent() {
             onClose={() => setIsProFeaturesVisible(false)}
             isPurchasing={isRevenueCatLoading}
           />
-        </SafeAreaView>
+          </SafeAreaView>
+        </Animated.View>
         {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
       </>
     );
   }
 
   if (launchScreen === "dailyQuote") {
+    const quoteStackValue = quoteStackDisplay ?? initialStackBalance;
+    // The paper now gets the spare height, so let the headline grow on taller screens.
+    const dailyQuotePaperFontSize = Math.round(dailyQuoteFontSize * (isCompactHeight ? 1 : windowHeight >= 850 ? 1.28 : 1.12));
     return (
       <>
-        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
+        <Animated.View key="dailyQuote" entering={screenEntering} exiting={screenExiting} style={styles.screenTransition}>
+          <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, { backgroundColor: terminal.bg }]}>
           <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
-          <View style={[styles.dailyQuoteScreen, darkMode && styles.dailyQuoteScreenDark]}>
-            <View style={styles.dailyQuoteBackButtonWrap}>
-              <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
+          <View style={[styles.terminalHeader, { backgroundColor: terminal.header }]}>
+            <View style={styles.dailyQuoteHeaderLeft}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                hitSlop={8}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  openMenuScreen();
+                }}
+                style={({ pressed }) => [styles.dailyQuoteHeaderBack, { borderColor: terminal.headerText }, pressed && { opacity: 0.6 }]}
+              >
+                <Text style={[styles.dailyQuoteHeaderBackText, { color: terminal.headerText }]}>&lt; BACK</Text>
+              </Pressable>
+              <Text numberOfLines={1} style={[styles.terminalHeaderBrand, styles.dailyQuoteHeaderBrand, { color: terminal.headerText }]}>
+                DAILY MONEY
+              </Text>
             </View>
-            <View style={[styles.dailyQuotePaper, darkMode && styles.dailyQuotePaperDark]}>
-              <View style={[styles.dailyQuoteTopRule, darkMode && styles.dailyQuoteTopRuleDark]} />
-              <View style={[styles.dailyQuoteTopRuleThin, darkMode && styles.dailyQuoteTopRuleThinDark]} />
-              <Text style={[styles.dailyQuoteMasthead, darkMode && styles.dailyQuoteMastheadDark]}>Daily Money</Text>
-              <View style={styles.dailyQuoteDateLine}>
-                <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
-                <Text style={[styles.dailyQuoteDate, darkMode && styles.dailyQuoteDateDark]}>{dailyMoneyDateLine}</Text>
-                <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
-              </View>
-              <View style={styles.dailyQuoteHeadlineWrap}>
-                <Text style={[styles.dailyQuoteHeadline, darkMode && styles.dailyQuoteHeadlineDark]}>“{dailyMoneyQuote.text}”</Text>
-                <View style={[styles.dailyQuoteHeadlineRule, darkMode && styles.dailyQuoteHeadlineRuleDark]} />
-              </View>
-              <Text style={[styles.dailyQuoteByline, darkMode && styles.dailyQuoteBylineDark]}>By {dailyMoneyQuote.author}</Text>
+            <View style={styles.dailyQuoteHeaderMetaRow}>
+              <Text style={[styles.terminalHeaderMeta, { color: terminal.headerText }]}>DQ &lt;GO&gt;</Text>
+              <Animated.Text style={[styles.terminalHeaderMeta, { color: terminal.headerText }, quoteCursorStyle]}>{"\u2588"}</Animated.Text>
             </View>
-            <View style={styles.dailyQuoteMoneyRow}>
-              <View style={styles.dailyQuoteMoneyIconWrap}>
-                <TwemojiBanknote width={30} height={30} />
-                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle1]}>
-                  <TwemojiBanknote width={22} height={22} />
-                </Animated.View>
-                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle2]}>
-                  <TwemojiBanknote width={20} height={20} />
-                </Animated.View>
-                <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle3]}>
-                  <TwemojiBanknote width={18} height={18} />
-                </Animated.View>
-              </View>
-              <Text style={[styles.dailyQuoteMoneyText, darkMode && styles.dailyQuoteMoneyTextDark]}>Stack: ${formatMoney(initialStackBalance)}</Text>
-            </View>
-            <UiButton
-              onPress={handleClaimDailyQuoteBonus}
-              disabled={!canClaimDailyQuote}
-              variant="borderedProminent"
-              color="#1a9f7a"
-              style={styles.dailyQuoteLockButton}
-              darkMode={darkMode}
+          </View>
+          <View style={[styles.dailyQuoteScreen, { backgroundColor: terminal.bg }]}>
+            <ScrollView
+              style={styles.dailyQuoteScroll}
+              contentContainerStyle={[styles.dailyQuoteContent, { paddingTop: isCompactHeight ? 8 : 14 }]}
+              showsVerticalScrollIndicator={false}
             >
-              <View style={styles.dailyQuoteLockButtonContent}>
-                <TwemojiLock width={18} height={18} />
-                <Text style={styles.dailyQuoteLockButtonText}>{canClaimDailyQuote ? "Lock In" : "Locked In Today"}</Text>
-              </View>
-            </UiButton>
-            <Text style={[styles.dailyQuoteClaimHint, darkMode && styles.dailyQuoteClaimHintDark]}>
-              {canClaimDailyQuote
-                ? isPro
-                  ? "Pro lock-in gives +$10 once per day."
-                  : "Lock in gives +$5 once per day. Pro gives +$10."
-                : "Come back tomorrow for another lock-in bonus."}
-            </Text>
-            {!isPro && (
-              <View style={styles.dailyQuoteProCounter}>
-                <Text style={[styles.dailyQuoteProCounterText, darkMode && styles.dailyQuoteProCounterTextDark]}>
-                  Mom saved this for you: +${formatMoney(quotePendingProBonus)}
-                </Text>
-              </View>
-            )}
-            {!isPro && (
-              <UiButton
-                title={proPrice ? `Unlock savings with Pro (${proPrice})` : "Unlock savings with Pro"}
-                onPress={() => setIsProFeaturesVisible(true)}
-                variant="borderedProminent"
-                color="#7a2038"
-                style={styles.dailyQuoteBuyProButton}
-                darkMode={darkMode}
+            <View
+              style={styles.dailyQuotePaperStage}
+              onLayout={(event) => {
+                quotePaperWidth.value = event.nativeEvent.layout.width;
+              }}
+            >
+              <Animated.View
+                style={[styles.dailyQuotePaper, isCompactHeight && styles.dailyQuotePaperCompact, darkMode && styles.dailyQuotePaperDark, quotePaperStyle]}
+              >
+                <View style={[styles.dailyQuoteTopRule, darkMode && styles.dailyQuoteTopRuleDark]} />
+                <View style={[styles.dailyQuoteTopRuleThin, darkMode && styles.dailyQuoteTopRuleThinDark]} />
+                <Text style={[styles.dailyQuoteMasthead, darkMode && styles.dailyQuoteMastheadDark]}>Daily Money</Text>
+                <View style={styles.dailyQuoteDateLine}>
+                  <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
+                  <Text style={[styles.dailyQuoteDate, darkMode && styles.dailyQuoteDateDark]}>{dailyMoneyDateLine}</Text>
+                  <View style={[styles.dailyQuoteDateDivider, darkMode && styles.dailyQuoteDateDividerDark]} />
+                </View>
+                <Animated.View style={[styles.dailyQuoteHeadlineWrap, quoteHeadlineStyle]}>
+                  <Text
+                    style={[
+                      styles.dailyQuoteHeadline,
+                      { fontSize: dailyQuotePaperFontSize, lineHeight: Math.round(dailyQuotePaperFontSize * 1.2) },
+                      darkMode && styles.dailyQuoteHeadlineDark,
+                    ]}
+                  >
+                    “{dailyMoneyQuote.text}”
+                  </Text>
+                  <View style={[styles.dailyQuoteHeadlineRule, darkMode && styles.dailyQuoteHeadlineRuleDark]} />
+                </Animated.View>
+                <Animated.View style={quoteBylineStyle}>
+                  <View style={styles.dailyQuoteBylineRow}>
+                    <Text style={[styles.dailyQuoteByline, darkMode && styles.dailyQuoteBylineDark]}>By {dailyMoneyQuote.author}</Text>
+                    {dailyMoneyQuote.unconfirmed ? (
+                      <View style={[styles.dailyQuoteUnconfirmedStamp, darkMode && styles.dailyQuoteUnconfirmedStampDark]}>
+                        <Text style={[styles.dailyQuoteUnconfirmedText, darkMode && styles.dailyQuoteUnconfirmedTextDark]}>Unconfirmed</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={[styles.dailyQuoteSource, darkMode && styles.dailyQuoteSourceDark]}>{dailyMoneyQuote.source}</Text>
+                </Animated.View>
+              </Animated.View>
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.dailyQuotePaperCover, { backgroundColor: terminal.bg, width: windowWidth + 40 }, quotePaperCoverStyle]}
               />
-            )}
+              <Animated.View pointerEvents="none" style={[styles.dailyQuotePaperRoll, quotePaperRollStyle]}>
+                <View style={styles.dailyQuotePaperRollBody}>
+                  <Svg width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 10 10">
+                    <Defs>
+                      <SvgLinearGradient id="quoteRoll" x1="0" y1="0" x2="1" y2="0">
+                        <Stop offset="0" stopColor={darkMode ? "#0f0d0a" : "#b9aa86"} />
+                        <Stop offset="0.35" stopColor={darkMode ? "#3a352b" : "#fbf6ea"} />
+                        <Stop offset="0.6" stopColor={darkMode ? "#2a261f" : "#ece2cb"} />
+                        <Stop offset="1" stopColor={darkMode ? "#0b0a08" : "#a8996f"} />
+                      </SvgLinearGradient>
+                    </Defs>
+                    <Rect x="0" y="0" width="10" height="10" fill="url(#quoteRoll)" />
+                  </Svg>
+                </View>
+              </Animated.View>
+            </View>
+            </ScrollView>
+            <View style={styles.dailyQuoteFooter}>
+              <View style={styles.dailyQuoteStatsRow}>
+                <View style={styles.dailyQuoteMoneyRow}>
+                  <View style={styles.dailyQuoteMoneyIconWrap}>
+                    <TwemojiBanknote width={26} height={26} />
+                    <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle1]}>
+                      <TwemojiBanknote width={20} height={20} />
+                    </Animated.View>
+                    <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle2]}>
+                      <TwemojiBanknote width={18} height={18} />
+                    </Animated.View>
+                    <Animated.View pointerEvents="none" style={[styles.dailyQuoteDropCash, quoteCashDropStyle3]}>
+                      <TwemojiBanknote width={16} height={16} />
+                    </Animated.View>
+                  </View>
+                  <Text style={[styles.dailyQuoteStackLabel, { color: terminal.amber }]}>STACK</Text>
+                  <Animated.Text style={[styles.dailyQuoteMoneyText, quoteStackValueStyle]}>${formatMoney(quoteStackValue)}</Animated.Text>
+                </View>
+                {!isPro && (
+                  <View style={[styles.dailyQuoteProCounter, { borderColor: terminal.amber }]}>
+                    <Text style={[styles.dailyQuoteProCounterText, { color: terminal.amber }]}>
+                      MOM SAVED +${formatMoney(quotePendingProBonus)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.dailyQuoteActionsRow}>
+                <UiButton
+                  title={canClaimDailyQuote ? `🔒 Lock In +$${isPro ? 10 : 5}` : "🔒 Locked Today"}
+                  onPress={handleClaimDailyQuoteBonus}
+                  disabled={!canClaimDailyQuote}
+                  variant="borderedProminent"
+                  color={terminal.green}
+                  style={styles.dailyQuoteLockButton}
+                  darkMode={darkMode}
+                />
+                {!isPro && (
+                  <UiButton
+                    title={proPrice ? `Pro ${proPrice}` : "Go Pro"}
+                    onPress={() => setIsProFeaturesVisible(true)}
+                    variant="borderedProminent"
+                    color={terminal.red}
+                    style={styles.dailyQuoteBuyProButton}
+                    darkMode={darkMode}
+                  />
+                )}
+              </View>
+              <Text numberOfLines={1} style={[styles.dailyQuoteClaimHint, { color: terminal.textDim }]}>
+                {canClaimDailyQuote
+                  ? isPro
+                    ? "+$10 once per day."
+                    : "+$5 once per day. Pro gives +$10."
+                  : "Back tomorrow for the next lock-in."}
+              </Text>
+            </View>
           </View>
           <ProFeaturesModal
             visible={isProFeaturesVisible}
@@ -2948,7 +3380,8 @@ function AppContent() {
             onClose={() => setIsProFeaturesVisible(false)}
             isPurchasing={isRevenueCatLoading}
           />
-        </SafeAreaView>
+          </SafeAreaView>
+        </Animated.View>
         {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
       </>
     );
@@ -2957,13 +3390,17 @@ function AppContent() {
   if (launchScreen === "settings") {
     return (
       <>
-        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={[styles.container, darkMode && styles.containerDark]}>
+        <Animated.View key="settings" entering={screenEntering} exiting={screenExiting} style={styles.screenTransition}>
+          <SafeAreaView
+            edges={["top", "left", "right", "bottom"]}
+            style={[styles.container, styles.settingsSafeArea, darkMode && styles.settingsSafeAreaDark]}
+          >
           <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
           <View style={[styles.settingsScreen, darkMode && styles.settingsScreenDark]}>
-            <View style={styles.settingsHeaderRow}>
-              <UiButton title="← Back" onPress={() => setLaunchScreen("menu")} variant="bordered" darkMode={darkMode} />
+            <View style={[styles.settingsHeaderRow, styles.settingsContentWidth]}>
+              <UiButton title="← Back" onPress={openMenuScreen} variant="bordered" darkMode={darkMode} />
             </View>
-            <View style={styles.settingsHeaderBlock}>
+            <View style={[styles.settingsHeaderBlock, styles.settingsContentWidth]}>
               <Text style={[styles.settingsTitle, darkMode && styles.settingsTitleDark]}>Settings</Text>
               <Text style={[styles.settingsSubtitle, darkMode && styles.settingsSubtitleDark]}>
                 {isPro ? "Pro member settings" : "Manage gameplay, account, and app preferences"}
@@ -3014,7 +3451,8 @@ function AppContent() {
             onClose={() => setIsProFeaturesVisible(false)}
             isPurchasing={isRevenueCatLoading}
           />
-        </SafeAreaView>
+          </SafeAreaView>
+        </Animated.View>
         {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
       </>
     );
@@ -3022,8 +3460,10 @@ function AppContent() {
 
   return (
     <>
-      <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, darkMode && styles.containerDark]}>
-        <StatusBar barStyle={darkMode ? "light-content" : "dark-content"} />
+      <Animated.View key="game" entering={screenEntering} exiting={screenExiting} style={styles.screenTransition}>
+        <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, darkMode && styles.containerDark]}>
+        <StatusBar barStyle={darkMode && !isTrainingMode ? "light-content" : "dark-content"} />
+        {isTrainingMode && <View pointerEvents="none" style={[styles.trainingTopInset, { height: insets.top }]} />}
         <ProfitToast
           visible={!!tradeToast}
           darkMode={darkMode}
@@ -3045,16 +3485,16 @@ function AppContent() {
               position: "absolute",
               top: insets.top + 60,
               alignSelf: "center",
-              backgroundColor: darkMode ? "rgba(30,30,30,0.9)" : "rgba(255,255,255,0.9)",
+              backgroundColor: terminal.panel,
               paddingVertical: 8,
               paddingHorizontal: 16,
-              borderRadius: 20,
+              borderRadius: 2,
               zIndex: 100,
               borderWidth: 1,
-              borderColor: darkMode ? "#333" : "#ddd",
+              borderColor: terminal.amber,
             }}
           >
-            <Text style={{ color: darkMode ? "#fff" : "#000", fontSize: 13, fontWeight: "600" }}>🎮 Signed in as {gameCenterPlayer.displayName}</Text>
+            <EmojiText style={{ color: terminal.amber, fontFamily: TERMINAL_FONT, fontSize: 12, fontWeight: "700" }}>🎮 SIGNED IN AS {gameCenterPlayer.displayName}</EmojiText>
           </Animated.View>
         )}
         <StackBar
@@ -3070,13 +3510,7 @@ function AppContent() {
           chartType={chartType}
           setChartType={applyChartType}
           openMenu={openMenuScreen}
-          openPatterns={() => {
-            if (isPro) {
-              setIsPatternSettingsVisible(true);
-            } else {
-              setIsProFeaturesVisible(true);
-            }
-          }}
+          openPatterns={() => setIsPatternSettingsVisible(true)}
           minorVariant={minorVariant}
           styles={styles}
         />
@@ -3119,9 +3553,9 @@ function AppContent() {
                   title={`${ms}ms`}
                   onPress={() => setChartSpeedMs(ms as ChartSpeedMs)}
                   variant={baseTickMs === ms ? "borderedProminent" : "bordered"}
-                  color={baseTickMs === ms ? "#1a9f7a" : undefined}
+                  color={baseTickMs === ms ? terminal.amber : undefined}
                   controlSize="small"
-                  style={styles.floatingSpeedButton}
+                  style={[styles.floatingSpeedButton, ms === 200 && styles.floatingSpeedButtonWide]}
                   darkMode={darkMode}
                 />
               ))}
@@ -3146,7 +3580,7 @@ function AppContent() {
                   title="Follow"
                   onPress={resetChartView}
                   variant="borderedProminent"
-                  color="#1a9f7a"
+                  color={terminal.blue}
                   controlSize="small"
                   style={styles.floatingFollowButton}
                   darkMode={darkMode}
@@ -3156,7 +3590,7 @@ function AppContent() {
                 title="1×"
                 onPress={() => applyZoomOutPreset(1)}
                 variant={zoomPreset === 1 ? "borderedProminent" : "bordered"}
-                color={zoomPreset === 1 ? "#1a9f7a" : undefined}
+                color={zoomPreset === 1 ? terminal.amber : undefined}
                 controlSize="small"
                 style={styles.floatingZoomButton}
                 darkMode={darkMode}
@@ -3165,7 +3599,7 @@ function AppContent() {
                 title="2×"
                 onPress={() => applyZoomOutPreset(2)}
                 variant={zoomPreset === 2 ? "borderedProminent" : "bordered"}
-                color={zoomPreset === 2 ? "#1a9f7a" : undefined}
+                color={zoomPreset === 2 ? terminal.amber : undefined}
                 controlSize="small"
                 style={styles.floatingZoomButton}
                 darkMode={darkMode}
@@ -3174,7 +3608,7 @@ function AppContent() {
                 title="3×"
                 onPress={() => applyZoomOutPreset(3)}
                 variant={zoomPreset === 3 ? "borderedProminent" : "bordered"}
-                color={zoomPreset === 3 ? "#1a9f7a" : undefined}
+                color={zoomPreset === 3 ? terminal.amber : undefined}
                 controlSize="small"
                 style={styles.floatingZoomButton}
                 darkMode={darkMode}
@@ -3201,6 +3635,7 @@ function AppContent() {
             onSell={handleSell}
             disabled={
               isTrainingMode ||
+              isQuizMode ||
               isRoundResultsVisible ||
               isMarginCallVisible ||
               (!isOvertime && (isRoundEnded || (typeof roundSecondsRemaining === "number" && roundSecondsRemaining <= 0)))
@@ -3208,7 +3643,7 @@ function AppContent() {
             styles={styles}
           />
 
-          {!isTrainingMode && shouldShowInGameBanner && (
+          {!isTrainingMode && !isQuizMode && shouldShowInGameBanner && (
             <Animated.View
               entering={FadeIn.duration(300)}
               exiting={FadeOut.duration(200)}
@@ -3274,7 +3709,7 @@ function AppContent() {
                   )}
                 </View>
                 <View style={[styles.startHintContent, { width: "100%", alignItems: "center" }]}>
-                  <Text style={[styles.startHintKicker, darkMode && styles.startHintKickerDark, { textAlign: "center" }]}>
+                  <Text style={[styles.startHintKicker, darkMode && styles.startHintKickerDark, showOvertimeHint && styles.overtimeHintInk, { textAlign: "center" }]}>
                     {showOvertimeHint
                       ? "Let it run!"
                       : showSpeedHint
@@ -3283,7 +3718,7 @@ function AppContent() {
                           ? "Training Wheels ON"
                           : `Ready for ${modeLabel}?`}
                   </Text>
-                  <Text style={[styles.startHintText, darkMode && styles.startHintTextDark, { textAlign: "center" }]}>
+                  <Text style={[styles.startHintText, darkMode && styles.startHintTextDark, showOvertimeHint && styles.overtimeHintInk, { textAlign: "center" }]}>
                     {showOvertimeHint
                       ? "Close position to end game"
                       : showSpeedHint
@@ -3300,8 +3735,8 @@ function AppContent() {
               </Pressable>
 
               {!showSpeedHint && !showOvertimeHint && showPatternLines && currentPatternLabel && (
-                <View style={{ marginTop: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12 }}>
-                  <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600", textAlign: "center" }}>Forming: {currentPatternLabel}</Text>
+                <View style={styles.trainingFormingTag}>
+                  <Text style={styles.trainingFormingTagText}>Forming: {currentPatternLabel}</Text>
                 </View>
               )}
             </Animated.View>
@@ -3317,6 +3752,16 @@ function AppContent() {
                 <Text style={styles.trainingFormingTagText}>Forming: {currentPatternLabel}</Text>
               </View>
             </Animated.View>
+          )}
+          {isQuizMode && (
+            <View pointerEvents="none" style={{ position: "absolute", top: 58, left: 12, right: 12, alignItems: "center", zIndex: 10 }}>
+              <PopQuizScoreTag score={quizScore} darkMode={darkMode} />
+            </View>
+          )}
+          {isQuizMode && quizPrompt && (
+            <View pointerEvents="box-none" style={{ position: "absolute", left: 12, right: 12, bottom: 12, zIndex: 20 }}>
+              <PopQuizCard prompt={quizPrompt} score={quizScore} darkMode={darkMode} onAnswer={answerQuiz} onContinue={resumeQuizMarket} />
+            </View>
           )}
         </View>
         <RoundResultsSheet
@@ -3339,7 +3784,7 @@ function AppContent() {
           togglePattern={togglePattern}
           showPatternLines={showPatternLines}
           onTogglePatternLines={() => {
-            if (isTrainingMode) {
+            if (isTrainingMode || isQuizMode) {
               return;
             }
             setShowPatternLines((prev) => {
@@ -3361,7 +3806,8 @@ function AppContent() {
           onClose={() => setIsProFeaturesVisible(false)}
           isPurchasing={isRevenueCatLoading}
         />
-      </SafeAreaView>
+        </SafeAreaView>
+      </Animated.View>
       {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
     </>
   );
@@ -3372,12 +3818,16 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
+  screenTransition: {
+    flex: 1,
+    overflow: "hidden",
+  },
   container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: TERMINAL_LIGHT.bg,
   },
   containerDark: {
-    backgroundColor: "#0d0f12",
+    backgroundColor: TERMINAL_DARK.bg,
   },
   chartWrapper: {
     flex: 1,
@@ -3387,84 +3837,109 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   stackBar: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 10,
+    minHeight: 56,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#eeeeee",
-    backgroundColor: "#ffffff",
+    borderBottomWidth: 2,
+    borderBottomColor: TERMINAL_LIGHT.amber,
+    backgroundColor: TERMINAL_LIGHT.panel,
   },
   stackBarDark: {
-    borderBottomColor: "#1f2329",
-    backgroundColor: "#0d0f12",
+    borderBottomColor: TERMINAL_DARK.amber,
+    backgroundColor: TERMINAL_DARK.bg,
   },
   stackBarTraining: {
-    borderBottomColor: "#148664",
-    backgroundColor: "#1a9f7a",
+    borderBottomColor: "#000000",
+    backgroundColor: TERMINAL_DARK.yellow,
+  },
+  trainingTopInset: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: TERMINAL_DARK.yellow,
   },
   stackLeft: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
   stackLabel: {
-    fontSize: 12,
-    color: "#666666",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: TERMINAL_LIGHT.amber,
   },
   stackLabelDark: {
-    color: "#9aa0a6",
+    color: TERMINAL_DARK.amber,
   },
   stackValue: {
+    fontFamily: TERMINAL_FONT,
     fontSize: 20,
     fontWeight: "700",
-    color: "#111111",
+    color: TERMINAL_LIGHT.text,
   },
   stackValueDark: {
-    color: "#f5f5f5",
+    color: TERMINAL_DARK.text,
   },
   stackTrainingWrap: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
   stackTrainingText: {
-    fontSize: 18,
+    flexShrink: 1,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 16,
     fontWeight: "800",
-    color: "#ffffff",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    color: "#000000",
   },
   stackTrainingTextDark: {
-    color: "#ffffff",
+    color: "#000000",
   },
   stackBarRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 6,
   },
   stackWager: {
     alignItems: "flex-end",
   },
   stackWagerLabel: {
-    fontSize: 12,
-    color: "#666666",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 10,
+    color: TERMINAL_LIGHT.amber,
   },
   stackWagerLabelDark: {
-    color: "#9aa0a6",
+    color: TERMINAL_DARK.amber,
   },
   stackWagerValue: {
+    fontFamily: TERMINAL_FONT,
     fontSize: 14,
-    fontWeight: "600",
-    color: "#1a9f7a",
+    fontWeight: "700",
+    color: TERMINAL_LIGHT.green,
   },
   stackWagerValueDark: {
-    color: "#8fe3c7",
+    color: TERMINAL_DARK.green,
   },
   settingsButton: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    minHeight: 36,
+    paddingHorizontal: 0,
+    borderRadius: 2,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "transparent",
@@ -3481,11 +3956,10 @@ const styles = StyleSheet.create({
   menuBurgerLine: {
     width: 14,
     height: 2,
-    borderRadius: 1,
-    backgroundColor: "#222222",
+    backgroundColor: TERMINAL_LIGHT.text,
   },
   menuBurgerLineDark: {
-    backgroundColor: "#e6e6e6",
+    backgroundColor: TERMINAL_DARK.amber,
   },
   chartTypeScroller: {
     maxWidth: 140,
@@ -3527,16 +4001,18 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   floatingZoomButton: {
-    height: 30,
-    width: 50,
+    height: 28,
+    minHeight: 28,
+    width: 44,
     paddingHorizontal: 0,
-    borderRadius: 10,
+    borderRadius: 2,
   },
   floatingFollowButton: {
-    height: 30,
+    height: 28,
+    minHeight: 28,
     width: 78,
     paddingHorizontal: 0,
-    borderRadius: 10,
+    borderRadius: 2,
   },
   floatingTimer: {
     position: "absolute",
@@ -3558,26 +4034,34 @@ const styles = StyleSheet.create({
   floatingSpeedButtons: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 2,
   },
   floatingSpeedButton: {
-    height: 30,
-    width: 50,
+    height: 28,
+    minHeight: 28,
+    width: 54,
     paddingHorizontal: 0,
-    borderRadius: 10,
+    borderRadius: 2,
+  },
+  floatingSpeedButtonWide: {
+    width: 58,
   },
   floatingTimerText: {
+    fontFamily: TERMINAL_FONT,
     fontSize: 18,
-    fontWeight: "900",
-    color: "#1a9f7a",
-    backgroundColor: "rgba(255, 255, 255, 0.85)",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 10,
+    fontWeight: "800",
+    color: TERMINAL_LIGHT.amber,
+    backgroundColor: TERMINAL_LIGHT.panel,
+    borderWidth: 1,
+    borderColor: TERMINAL_LIGHT.amber,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
     overflow: "hidden",
   },
   floatingTimerTextDark: {
-    backgroundColor: "rgba(13, 15, 18, 0.85)",
+    color: TERMINAL_DARK.amber,
+    backgroundColor: TERMINAL_DARK.bg,
+    borderColor: TERMINAL_DARK.amber,
   },
   floatingTradeCounter: {
     position: "absolute",
@@ -3589,155 +4073,207 @@ const styles = StyleSheet.create({
   },
   floatingTradeCounterDark: {},
   floatingTradeCounterText: {
-    fontSize: 14,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 13,
     fontWeight: "800",
-    color: "#1a9f7a",
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 10,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: TERMINAL_LIGHT.amber,
+    backgroundColor: TERMINAL_LIGHT.panel,
+    borderWidth: 1,
+    borderColor: TERMINAL_LIGHT.amber,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     overflow: "hidden",
   },
   floatingTradeCounterTextDark: {
-    backgroundColor: "rgba(13, 15, 18, 0.85)",
-    color: "#8fe3c7",
+    color: TERMINAL_DARK.amber,
+    backgroundColor: TERMINAL_DARK.bg,
+    borderColor: TERMINAL_DARK.amber,
   },
   launchMenu: {
     flex: 1,
     width: "100%",
   },
+  launchMenuContent: {
+    flexGrow: 1,
+  },
+  terminalHeader: {
+    height: LAUNCH_MENU_HEADER_HEIGHT,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+  },
+  terminalHeaderBrand: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: 3,
+  },
+  terminalHeaderMeta: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
   launchMenuButton: {
-    flex: 1,
     width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+  launchMenuCode: {
+    width: 34,
+    height: 34,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 24,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.25)",
   },
-  launchMenuButtonQuote: {
-    backgroundColor: "#0f5132",
-    borderTopWidth: 0,
+  launchMenuCodeText: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 18,
+    fontWeight: "900",
   },
-  launchMenuButtonSprint: {
-    backgroundColor: "#1a9f7a",
+  launchMenuTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
-  launchMenuButtonFive: {
-    backgroundColor: "#f5a623",
-  },
-  launchMenuButtonTraining: {
-    backgroundColor: "#2e4057",
-  },
-  launchMenuButtonPro: {
-    backgroundColor: "#7a2038",
-  },
-  launchMenuButtonSettings: {
-    backgroundColor: "#374151",
+  launchMenuGo: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
   launchMenuTitle: {
-    fontSize: 30,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 22,
     fontWeight: "800",
-    color: "#ffffff",
-    textAlign: "center",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  launchMenuTitleCompact: {
+    fontSize: 18,
   },
   launchMenuSubtitle: {
-    marginTop: 10,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.9)",
-    textAlign: "center",
+    marginTop: 4,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "500",
   },
   settingsScreen: {
     flex: 1,
-    backgroundColor: "#eef3f8",
+    backgroundColor: TERMINAL_LIGHT.bg,
     paddingHorizontal: 16,
     paddingTop: 8,
   },
   settingsScreenDark: {
-    backgroundColor: "#13181d",
+    backgroundColor: TERMINAL_DARK.bg,
+  },
+  settingsSafeArea: {
+    backgroundColor: TERMINAL_LIGHT.bg,
+  },
+  settingsSafeAreaDark: {
+    backgroundColor: TERMINAL_DARK.bg,
   },
   settingsHeaderRow: {
     alignItems: "flex-start",
     marginBottom: 10,
   },
+  settingsContentWidth: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
+  },
   settingsHeaderBlock: {
     marginBottom: 14,
     paddingHorizontal: 4,
+    paddingBottom: 10,
+    borderBottomWidth: 2,
+    borderBottomColor: TERMINAL_DARK.amber,
   },
   settingsTitle: {
-    fontSize: 34,
-    fontWeight: "900",
-    color: "#0f1720",
-    letterSpacing: 0.2,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 28,
+    fontWeight: "800",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: TERMINAL_LIGHT.text,
   },
   settingsTitleDark: {
-    color: "#f3f7fb",
+    color: TERMINAL_DARK.amber,
   },
   settingsSubtitle: {
     marginTop: 6,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#4f6378",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "500",
+    color: TERMINAL_LIGHT.textDim,
   },
   settingsSubtitleDark: {
-    color: "#a5b6c7",
+    color: TERMINAL_DARK.textDim,
   },
   settingsScroll: {
     flex: 1,
   },
   settingsScrollContent: {
     paddingBottom: 28,
+    alignItems: "center",
   },
   settingsSection: {
+    width: "100%",
+    maxWidth: 720,
     marginBottom: 16,
   },
   settingsSectionTitle: {
-    fontSize: 12,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 11,
     fontWeight: "800",
-    color: "#6d7f92",
+    color: TERMINAL_LIGHT.amber,
     textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 8,
-    marginLeft: 4,
+    letterSpacing: 1.5,
+    marginBottom: 6,
+    marginLeft: 2,
   },
   settingsSectionTitleDark: {
-    color: "#8ea0b3",
+    color: TERMINAL_DARK.amber,
   },
   settingsCard: {
-    borderRadius: 14,
-    backgroundColor: "#ffffff",
+    borderRadius: 2,
+    backgroundColor: TERMINAL_LIGHT.panel,
     borderWidth: 1,
-    borderColor: "#d9e3ed",
+    borderColor: TERMINAL_LIGHT.border,
     overflow: "hidden",
   },
   settingsCardDark: {
-    backgroundColor: "#1b242d",
-    borderColor: "#2a3642",
+    backgroundColor: TERMINAL_DARK.panel,
+    borderColor: TERMINAL_DARK.border,
   },
   settingsRow: {
-    minHeight: 72,
+    minHeight: 64,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
   },
   settingsRowDark: {
-    backgroundColor: "#1b242d",
+    backgroundColor: TERMINAL_DARK.panel,
   },
   settingsRowBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: "#e5edf4",
+    borderBottomColor: TERMINAL_LIGHT.border,
   },
   settingsRowBorderDark: {
-    borderBottomColor: "#2a3642",
+    borderBottomColor: TERMINAL_DARK.border,
   },
   settingsRowPressed: {
-    backgroundColor: "#f2f7fc",
+    backgroundColor: TERMINAL_LIGHT.panelAlt,
   },
   settingsRowPressedDark: {
-    backgroundColor: "#24313d",
+    backgroundColor: TERMINAL_DARK.panelAlt,
   },
   settingsRowLeading: {
     flex: 1,
@@ -3756,59 +4292,140 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   settingsRowLabel: {
-    fontSize: 16,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 15,
     fontWeight: "700",
-    color: "#132031",
+    textTransform: "uppercase",
+    color: TERMINAL_LIGHT.text,
   },
   settingsRowLabelDark: {
-    color: "#eef5fd",
+    color: TERMINAL_DARK.text,
   },
   settingsRowSubtitle: {
-    fontSize: 12,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 11,
     fontWeight: "500",
-    color: "#5f7388",
+    color: TERMINAL_LIGHT.textDim,
   },
   settingsRowSubtitleDark: {
-    color: "#9eb0c3",
+    color: TERMINAL_DARK.textDim,
   },
   settingsRowChevron: {
-    fontSize: 24,
-    fontWeight: "400",
-    color: "#7e92a7",
-    lineHeight: 24,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "800",
+    color: TERMINAL_LIGHT.amber,
   },
   settingsRowChevronDark: {
-    color: "#9db2c7",
+    color: TERMINAL_DARK.amber,
   },
   dailyQuoteScreen: {
     flex: 1,
-    paddingHorizontal: 24,
+  },
+  dailyQuoteHeaderMetaRow: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    backgroundColor: "#f5f0e1",
+    gap: 2,
   },
-  dailyQuoteBackButtonWrap: {
+  dailyQuoteScroll: {
+    flex: 1,
+  },
+  dailyQuoteContent: {
+    flexGrow: 1,
+    width: "100%",
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+    alignItems: "center",
+  },
+  dailyQuoteFooter: {
+    width: "100%",
+    maxWidth: 680,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 6,
+    gap: 8,
+  },
+  dailyQuoteStatsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  dailyQuoteActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  dailyQuoteHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexShrink: 1,
+  },
+  dailyQuoteHeaderBack: {
+    borderWidth: 1,
+    borderRadius: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  dailyQuoteHeaderBackText: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+  dailyQuoteHeaderBrand: {
+    fontSize: 15,
+    letterSpacing: 2,
+    flexShrink: 1,
+  },
+  dailyQuotePaperStage: {
+    flexGrow: 1,
+    width: "100%",
+    maxWidth: 640,
+  },
+  dailyQuotePaperCover: {
     position: "absolute",
-    top: 8,
+    top: -6,
+    bottom: -20,
     left: 0,
-    right: 0,
-    alignItems: "flex-start",
-    paddingHorizontal: 8,
-    zIndex: 5,
   },
-  dailyQuoteScreenDark: {
-    backgroundColor: "#151311",
+  dailyQuotePaperRoll: {
+    position: "absolute",
+    top: -5,
+    bottom: -5,
+    left: 0,
+    width: QUOTE_ROLL_WIDTH,
+    shadowColor: "#000000",
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 2, height: 2 },
+  },
+  dailyQuotePaperRollBody: {
+    flex: 1,
+    borderRadius: QUOTE_ROLL_WIDTH / 2,
+    overflow: "hidden",
   },
   dailyQuotePaper: {
+    flexGrow: 1,
     width: "100%",
-    borderRadius: 14,
+    maxWidth: 640,
+    borderRadius: 3,
+    shadowColor: "#000000",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
     paddingHorizontal: 18,
     paddingTop: 16,
     paddingBottom: 16,
     backgroundColor: "#f5f0e1",
     borderWidth: 1,
     borderColor: "#ddd4c0",
+  },
+  dailyQuotePaperCompact: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   dailyQuotePaperDark: {
     backgroundColor: "#201d18",
@@ -3868,12 +4485,12 @@ const styles = StyleSheet.create({
     color: "#c7b899",
   },
   dailyQuoteHeadlineWrap: {
+    flexGrow: 1,
     alignItems: "center",
+    justifyContent: "center",
     marginBottom: 12,
   },
   dailyQuoteHeadline: {
-    fontSize: 36,
-    lineHeight: 44,
     fontWeight: "600",
     fontFamily: "Georgia",
     color: "#1f1f1f",
@@ -3902,10 +4519,49 @@ const styles = StyleSheet.create({
   dailyQuoteBylineDark: {
     color: "#c7b899",
   },
+  dailyQuoteBylineRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  dailyQuoteUnconfirmedStamp: {
+    borderWidth: 1.5,
+    borderColor: "#a3241b",
+    borderRadius: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    transform: [{ rotate: "-4deg" }],
+  },
+  dailyQuoteUnconfirmedStampDark: {
+    borderColor: "#e0675a",
+  },
+  dailyQuoteUnconfirmedText: {
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    color: "#a3241b",
+    textTransform: "uppercase",
+  },
+  dailyQuoteUnconfirmedTextDark: {
+    color: "#e0675a",
+  },
+  dailyQuoteSource: {
+    marginTop: 5,
+    fontSize: 10,
+    lineHeight: 14,
+    fontStyle: "italic",
+    color: "#777064",
+    textAlign: "center",
+  },
+  dailyQuoteSourceDark: {
+    color: "#a99d87",
+  },
   dailyQuoteMoneyRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   dailyQuoteMoneyIconWrap: {
     width: 34,
@@ -3922,57 +4578,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  dailyQuoteStackLabel: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+  },
   dailyQuoteMoneyText: {
+    fontFamily: TERMINAL_FONT,
     fontSize: 20,
     fontWeight: "700",
-    color: "#0f5132",
-  },
-  dailyQuoteMoneyTextDark: {
-    color: "#b9ead7",
+    fontVariant: ["tabular-nums"],
   },
   dailyQuoteLockButton: {
-    minWidth: 240,
-  },
-  dailyQuoteLockButtonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  dailyQuoteLockButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700",
+    flex: 2,
   },
   dailyQuoteClaimHint: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#356d57",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 11,
     textAlign: "center",
-  },
-  dailyQuoteClaimHintDark: {
-    color: "#9bcbb9",
   },
   dailyQuoteBuyProButton: {
-    minWidth: 240,
+    flex: 1,
   },
   dailyQuoteProCounter: {
-    marginTop: 4,
-    marginBottom: 4,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: "rgba(15,81,50,0.12)",
-    alignSelf: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 2,
+    borderWidth: 1,
   },
   dailyQuoteProCounterText: {
-    color: "#0f5132",
-    fontSize: 14,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
     fontWeight: "700",
     textAlign: "center",
-  },
-  dailyQuoteProCounterTextDark: {
-    color: "#b9ead7",
   },
   topSafeArea: {
     position: "absolute",
@@ -3984,16 +4623,13 @@ const styles = StyleSheet.create({
   },
   profitToast: {
     width: "100%",
-    backgroundColor: "#ffffff",
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 18,
-    borderColor: "#e6e6e6",
+    backgroundColor: TERMINAL_LIGHT.panel,
+    borderBottomWidth: 2,
+    borderColor: TERMINAL_LIGHT.amber,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.15,
-    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
     elevation: 6,
     overflow: "hidden",
   },
@@ -4003,35 +4639,39 @@ const styles = StyleSheet.create({
     top: 10,
     left: 12,
     right: 12,
-    backgroundColor: "#1a9f7a",
-    borderRadius: 16,
-    paddingVertical: 20,
+    backgroundColor: TERMINAL_LIGHT.panel,
+    borderWidth: 1,
+    borderColor: TERMINAL_LIGHT.amber,
+    borderLeftWidth: 4,
+    borderRadius: 2,
+    paddingVertical: 18,
     paddingHorizontal: 24,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 8,
     zIndex: 10,
     overflow: "hidden",
   },
   startHintContainerDark: {
-    backgroundColor: "#1a9f7a",
+    backgroundColor: TERMINAL_DARK.panel,
+    borderColor: TERMINAL_DARK.amber,
   },
   inGameBannerCloseButton: {
     position: "absolute",
-    top: 12,
-    right: 20,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    top: 10,
+    right: 18,
+    width: 26,
+    height: 26,
+    borderRadius: 2,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.18)",
+    backgroundColor: TERMINAL_LIGHT.amber,
     zIndex: 12,
   },
   inGameBannerCloseButtonDark: {
-    backgroundColor: "rgba(0,0,0,0.28)",
+    backgroundColor: TERMINAL_DARK.amber,
   },
   inGameBannerCloseGlyph: {
     width: 14,
@@ -4041,10 +4681,9 @@ const styles = StyleSheet.create({
   },
   inGameBannerCloseLine: {
     position: "absolute",
-    width: 14,
+    width: 12,
     height: 2,
-    borderRadius: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#000000",
   },
   inGameBannerCloseLineA: {
     transform: [{ rotate: "45deg" }],
@@ -4053,50 +4692,62 @@ const styles = StyleSheet.create({
     transform: [{ rotate: "-45deg" }],
   },
   inGameBannerCloseLineDark: {
-    backgroundColor: "#ffffff",
+    backgroundColor: "#000000",
   },
   trainingFormingTag: {
     marginTop: 8,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 12,
+    backgroundColor: "#000000",
+    borderWidth: 1,
+    borderColor: TERMINAL_DARK.yellow,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 2,
   },
   trainingFormingTagText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "600",
+    color: TERMINAL_DARK.yellow,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
     textAlign: "center",
   },
+  overtimeHintInk: {
+    color: "#000000",
+  },
   overtimeHintContainer: {
-    backgroundColor: "#f5a623",
+    backgroundColor: TERMINAL_DARK.amber,
+    borderColor: "#000000",
   },
   startHintContent: {
     alignItems: "center",
     zIndex: 2,
   },
   overtimeBurstLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1,
   },
   startHintKicker: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "rgba(255, 255, 255, 0.8)",
-    letterSpacing: 0.3,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 11,
+    fontWeight: "800",
+    color: TERMINAL_LIGHT.amber,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
     marginBottom: 4,
   },
   startHintKickerDark: {
-    color: "rgba(255, 255, 255, 0.8)",
+    color: TERMINAL_DARK.amber,
   },
   startHintText: {
-    fontSize: 18,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 16,
     fontWeight: "800",
-    color: "#ffffff",
+    color: TERMINAL_LIGHT.text,
     textAlign: "center",
   },
   startHintTextDark: {
-    color: "#ffffff",
+    color: TERMINAL_DARK.text,
   },
   startHintCoins: {
     position: "absolute",
@@ -4104,7 +4755,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
-    opacity: 0.9,
+    opacity: 0.35,
     zIndex: 1,
   },
   startHintCoin1: {
@@ -4125,8 +4776,8 @@ const styles = StyleSheet.create({
     transform: [{ rotate: "-10deg" }],
   },
   profitToastDark: {
-    backgroundColor: "#151922",
-    borderColor: "#2b2f35",
+    backgroundColor: TERMINAL_DARK.bg,
+    borderColor: TERMINAL_DARK.amber,
   },
   profitToastContent: {
     width: "100%",
@@ -4136,31 +4787,37 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   profitToastKicker: {
-    fontSize: 14,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
     fontWeight: "800",
-    color: "#8b9098",
-    letterSpacing: 0.2,
+    color: TERMINAL_LIGHT.amber,
+    letterSpacing: 1,
+    textTransform: "uppercase",
     width: "100%",
     textAlign: "center",
   },
   profitToastKickerDark: {
-    color: "#a9b0b8",
+    color: TERMINAL_DARK.amber,
   },
   profitToastBigValue: {
-    marginTop: 8,
-    fontSize: 54,
+    marginTop: 6,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 50,
     fontWeight: "800",
-    color: "#1a9f7a",
+    color: TERMINAL_LIGHT.green,
     textAlign: "center",
   },
+  profitToastBigValueDark: {
+    color: TERMINAL_DARK.green,
+  },
   profitToastBigValueLoss: {
-    color: "#d94b4b",
+    color: TERMINAL_LIGHT.red,
   },
   profitToastBigValueFlat: {
-    color: "#666666",
+    color: TERMINAL_LIGHT.textDim,
   },
   profitToastBigValueLiquidation: {
-    color: "#b03030",
+    color: TERMINAL_LIGHT.red,
   },
   profitToastRocket: {
     position: "absolute",
@@ -4273,23 +4930,23 @@ const styles = StyleSheet.create({
   wagerBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    borderRadius: 16,
-    borderColor: "#e6e6e6",
+    gap: 6,
+    padding: 4,
+    backgroundColor: TERMINAL_LIGHT.panel,
+    borderWidth: 1,
+    borderRadius: 2,
+    borderColor: TERMINAL_LIGHT.border,
   },
   wagerBarDark: {
-    backgroundColor: "rgba(18,20,24,0.96)",
-    borderColor: "#2b2f35",
+    backgroundColor: TERMINAL_DARK.bg,
+    borderColor: TERMINAL_DARK.border,
   },
   wagerPicker: {
     flex: 1,
-    height: 32,
+    height: 36,
   },
   wagerModeButton: {
     width: 112,
-    paddingVertical: 2,
-    paddingHorizontal: 2,
   },
   wagerModeButtonControl: {
     width: "100%",
@@ -4306,12 +4963,11 @@ const styles = StyleSheet.create({
   tradeBar: {
     flexDirection: "row",
     alignItems: "stretch",
-    gap: TRADE_BAR_GAP,
+    gap: 8,
   },
   tradeButton: {
     flex: 1,
-    minHeight: 48,
-    borderRadius: 12,
+    height: 54,
     alignItems: "center",
     justifyContent: "center",
   },

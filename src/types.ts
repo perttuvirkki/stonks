@@ -11,8 +11,11 @@ export type PatternDefinition = {
   id: string;
   label: string;
   length: number;
+  direction?: PatternDirection;
   generate: (startPrice: number) => PatternResult;
 };
+
+export type PatternDirection = "bullish" | "bearish" | "neutral";
 
 export type PatternResult = {
   candles: Candle[];

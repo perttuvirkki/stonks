@@ -1,8 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Dimensions, Image, Platform, Share, StyleSheet, Text, TextInput, View, Alert, Modal, TouchableOpacity, TouchableWithoutFeedback, Keyboard } from "react-native";
+import { Image, Platform, Share, StyleSheet, Text, TextInput, View, Alert, Modal, TouchableOpacity, TouchableWithoutFeedback, Keyboard, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
-import ViewShot from "react-native-view-shot";
+import ViewShot, { type ViewShotRef } from "react-native-view-shot";
 import TwemojiRocket from "../../assets/twemoji/1f680.svg";
 import TwemojiCoin from "../../assets/twemoji/1fa99.svg";
 import TwemojiBanknote from "../../assets/twemoji/1f4b5.svg";
@@ -10,6 +10,8 @@ import TwemojiFreezingFace from "../../assets/twemoji/1f976.svg";
 import TwemojiHotFace from "../../assets/twemoji/1f975.svg";
 import TwemojiSkull from "../../assets/twemoji/1f480.svg";
 import { UiButton } from "./UiButton";
+import { EmojiText } from "./Twemoji";
+import { TERMINAL_FONT, getTerminalPalette } from "../theme/terminal";
 
 export type RoundStats = {
   tradesMade: number;
@@ -40,13 +42,13 @@ export type RoundResultsSheetProps = {
 
 export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound, onShowLeaderboard }: RoundResultsSheetProps) => {
   const insets = useSafeAreaInsets();
-  const windowHeight = Dimensions.get("window").height;
+  const { height: windowHeight } = useWindowDimensions();
 
   const translateY = useSharedValue(windowHeight);
 
   const [rendered, setRendered] = useState(visible);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const viewShotRef = useRef<ViewShot>(null);
+  const viewShotRef = useRef<ViewShotRef>(null);
 
   const handleShare = useCallback(async () => {
     try {
@@ -66,19 +68,20 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
     transform: [{ translateY: translateY.value }],
   }));
 
-  const palette = useMemo(
-    () => ({
-      background: darkMode ? "#0d0f12" : "#ffffff",
-      textPrimary: darkMode ? "#f5f5f5" : "#111111",
-      textSecondary: darkMode ? "#b8bec6" : "#666666",
-      divider: darkMode ? "#1f2329" : "#eeeeee",
-      kicker: "#1a9f7a",
-      danger: "#d94b4b",
-      button: "#1a9f7a",
-      profit: "#1a9f7a",
-    }),
-    [darkMode]
-  );
+  const palette = useMemo(() => {
+    const terminal = getTerminalPalette(darkMode);
+    return {
+      background: terminal.bg,
+      textPrimary: terminal.text,
+      textSecondary: terminal.textDim,
+      divider: terminal.border,
+      kicker: terminal.amber,
+      danger: terminal.red,
+      button: terminal.amber,
+      profit: terminal.green,
+      inputBg: terminal.panel,
+    };
+  }, [darkMode]);
 
   useEffect(() => {
     if (hideTimeoutRef.current) {
@@ -336,7 +339,7 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
   return (
     <Animated.View pointerEvents={visible ? "auto" : "none"} style={[styles.container, { backgroundColor: palette.background }, overlayStyle]}>
       <ViewShot ref={viewShotRef} options={{ format: "png", quality: 1 }} style={[styles.viewShot, { backgroundColor: palette.background }]}>
-        <View style={[styles.topChrome, { borderBottomColor: palette.divider }]} />
+        <View style={[styles.topChrome, { borderBottomColor: palette.kicker }]} />
         <BackgroundAccessory />
         <View style={[styles.content, { paddingTop: Math.max(28, insets.top + 18) }]}>
           {/* App branding for screenshot shares */}
@@ -354,9 +357,9 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
             {percentPrefix}
             {testPercent.toFixed(1)}%
           </Text>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>{titleText}</Text>
+          <EmojiText style={[styles.title, { color: palette.textPrimary }]}>{titleText}</EmojiText>
           <View style={{ alignItems: 'center', zIndex: 20 }}>
-            <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{subtitleText}</Text>
+            <EmojiText style={[styles.subtitle, { color: palette.textSecondary }]}>{subtitleText}</EmojiText>
             {screenshotTag && (
               <View 
                 style={{ 
@@ -366,9 +369,9 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
                   backgroundColor: palette.profit, 
                   paddingHorizontal: 16, 
                   paddingVertical: 8, 
-                  borderRadius: 24,
+                  borderRadius: 2,
                   borderWidth: 2,
-                  borderColor: "#ffffff",
+                  borderColor: palette.background,
                   shadowColor: "#000",
                   shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.3,
@@ -377,13 +380,13 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
                   transform: [{ rotate: "-3deg" }]
                 }}
               >
-                <Text style={{ color: "#ffffff", fontSize: 16, fontWeight: "800", letterSpacing: -0.5 }}>
+                <Text style={{ color: "#000000", fontFamily: TERMINAL_FONT, fontSize: 15, fontWeight: "800" }}>
                   @{screenshotTag.replace(/^@/, '')}
                 </Text>
               </View>
             )}
           </View>
-          <View style={[styles.statsContainer, { borderTopColor: palette.divider }]}>
+          <View style={[styles.statsContainer, { borderTopColor: palette.kicker }]}>
             <View style={[styles.statRow, { borderBottomColor: palette.divider }]}>
               <Text style={[styles.statLabel, { color: palette.textSecondary }]}>Trades Won</Text>
               <Text style={[styles.statValue, { color: palette.profit }]}>{safeResult.stats.tradesWon}</Text>
@@ -459,7 +462,7 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { backgroundColor: palette.background }]}>
+            <View style={[styles.modalContent, { backgroundColor: palette.background, borderColor: palette.kicker }]}>
               <Text style={[styles.modalTitle, { color: palette.textPrimary }]}>Add Tag</Text>
               <Text style={[styles.modalSubtitle, { color: palette.textSecondary }]}>
                 Enter a name or tag for your screenshot
@@ -468,7 +471,7 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
                 style={[styles.modalInput, { 
                   color: palette.textPrimary, 
                   borderColor: palette.divider,
-                  backgroundColor: darkMode ? "#1a1d22" : "#f5f5f5"
+                  backgroundColor: palette.inputBg
                 }]}
                 value={tagInputValue}
                 onChangeText={setTagInputValue}
@@ -483,7 +486,7 @@ export const RoundResultsSheet = memo(({ visible, darkMode, result, onNextRound,
                   <Text style={[styles.modalButtonText, { color: palette.textSecondary }]}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={handleTagSubmit} style={styles.modalButton}>
-                  <Text style={[styles.modalButtonText, { color: palette.profit }]}>OK</Text>
+                  <Text style={[styles.modalButtonText, { color: palette.kicker }]}>OK</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -506,8 +509,8 @@ const styles = StyleSheet.create({
     zIndex: 45,
   },
   topChrome: {
-    height: 1,
-    borderBottomWidth: 1,
+    height: 2,
+    borderBottomWidth: 2,
   },
   appBranding: {
     position: "absolute",
@@ -521,7 +524,7 @@ const styles = StyleSheet.create({
   appIcon: {
     width: 64,
     height: 64,
-    borderRadius: 14,
+    borderRadius: 4,
   },
   appName: {
     fontSize: 18,
@@ -538,28 +541,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   pnlValue: {
-    fontSize: 56,
-    fontWeight: "900",
-    letterSpacing: -0.8,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 52,
+    fontWeight: "800",
+    letterSpacing: -1,
     marginBottom: 6,
     textAlign: "center",
   },
   title: {
-    fontSize: 28,
-    fontWeight: "900",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 24,
+    fontWeight: "800",
+    textTransform: "uppercase",
     textAlign: "center",
     marginBottom: 10,
   },
   subtitle: {
-    fontSize: 15,
-    fontWeight: "700",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 13,
+    fontWeight: "500",
     textAlign: "center",
     lineHeight: 20,
     maxWidth: 320,
   },
   statsContainer: {
     width: "100%",
-    borderTopWidth: 1,
+    borderTopWidth: 2,
     marginTop: 22,
     paddingTop: 8,
     maxWidth: 320,
@@ -572,15 +579,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   statLabel: {
-    fontSize: 14,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
     fontWeight: "600",
+    textTransform: "uppercase",
   },
   statValue: {
-    fontSize: 16,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 15,
     fontWeight: "800",
   },
   footer: {
     width: "100%",
+    maxWidth: 640,
+    alignSelf: "center",
     paddingHorizontal: 16,
   },
   buttons: {
@@ -595,12 +607,12 @@ const styles = StyleSheet.create({
   },
 
   backgroundAccessories: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: "hidden",
   },
   bgItem: {
     position: "absolute",
-    opacity: 0.55,
+    opacity: 0.35,
   },
   bgA: {
     top: 70,
@@ -637,7 +649,8 @@ const styles = StyleSheet.create({
   modalContent: {
     width: "100%",
     maxWidth: 320,
-    borderRadius: 14,
+    borderRadius: 2,
+    borderWidth: 1,
     padding: 20,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
@@ -646,19 +659,23 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   modalTitle: {
-    fontSize: 18,
+    fontFamily: TERMINAL_FONT,
+    textTransform: "uppercase",
+    fontSize: 16,
     fontWeight: "700",
     textAlign: "center",
     marginBottom: 8,
   },
   modalSubtitle: {
-    fontSize: 14,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
     textAlign: "center",
     marginBottom: 16,
   },
   modalInput: {
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 2,
+    fontFamily: TERMINAL_FONT,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
@@ -674,7 +691,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   modalButtonText: {
-    fontSize: 16,
+    fontFamily: TERMINAL_FONT,
+    textTransform: "uppercase",
+    fontSize: 14,
     fontWeight: "600",
   },
 });

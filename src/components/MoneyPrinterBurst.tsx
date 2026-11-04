@@ -153,7 +153,7 @@ export const MoneyPrinterBurst = memo(function MoneyPrinterBurst({ trigger, dark
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
   },
   printer: {

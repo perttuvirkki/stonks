@@ -12,6 +12,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     "expo-router",
     [
+      "expo-splash-screen",
+      {
+        image: "./assets/splash-custom.png",
+        resizeMode: "contain",
+        backgroundColor: "#ffffff",
+      },
+    ],
+    "expo-status-bar",
+    [
       "expo-stores-games-services",
       {
         android: {
@@ -21,16 +30,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         },
       },
     ],
+    "./plugins/withSceneLifecycle",
+    "./plugins/withPodsDeploymentTarget",
   ],
   orientation: "portrait",
   icon: APP_ICON,
   userInterfaceStyle: "light",
-  newArchEnabled: true,
-  splash: {
-    image: "./assets/splash-custom.png",
-    resizeMode: "contain",
-    backgroundColor: "#ffffff",
-  },
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.ludussuper.stonks",
@@ -42,7 +47,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       foregroundImage: APP_ICON,
       backgroundColor: "#ffffff",
     },
-    edgeToEdgeEnabled: true,
     package: "com.ludussuper.stonks",
     versionCode: 5,
   },

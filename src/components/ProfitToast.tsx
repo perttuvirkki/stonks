@@ -65,7 +65,7 @@ export function ProfitToast({
 
         <SafeAreaView edges={["top"]} style={styles.profitToastContent}>
           <Text style={[styles.profitToastKicker, darkMode && styles.profitToastKickerDark]}>{title}</Text>
-          <Text style={[styles.profitToastBigValue, subtitleStyle]}>{subtitle}</Text>
+          <Text style={[styles.profitToastBigValue, darkMode && styles.profitToastBigValueDark, subtitleStyle]}>{subtitle}</Text>
         </SafeAreaView>
       </Animated.View>
     </View>
@@ -78,7 +78,7 @@ const localStyles = StyleSheet.create({
     position: "relative",
   },
   rocketLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 2,
   },
 });

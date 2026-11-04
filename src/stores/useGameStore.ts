@@ -62,6 +62,22 @@ const DEFAULT_LIFETIME_STATS: LifetimeStats = {
   leverageStats: { ...DEFAULT_LEVERAGE_STATS },
 };
 
+const mergeLifetimeStats = (stored: Partial<LifetimeStats> | undefined): LifetimeStats => {
+  const storedLeverage = stored?.leverageStats ?? {};
+  const leverageStats = Object.fromEntries(
+    Object.entries({ ...DEFAULT_LEVERAGE_STATS, ...storedLeverage }).map(([leverage, stats]) => [
+      leverage,
+      { ...DEFAULT_LEVERAGE_STATS[Number(leverage)], ...stats },
+    ]),
+  );
+
+  return {
+    ...DEFAULT_LIFETIME_STATS,
+    ...stored,
+    leverageStats,
+  };
+};
+
 type GameState = {
   highScores: HighScore[];
   isPro: boolean;
@@ -78,6 +94,7 @@ type GameState = {
   claimDailyQuoteBonus: (dayKey: string, amount: number, pendingProBonusAmount?: number) => boolean;
   releasePendingProQuoteBonus: () => number;
   recordRoundEnd: (stats: {
+    tradesMade?: number;
     tradesWon: number;
     tradesLost: number;
     profitAmount: number;
@@ -178,7 +195,7 @@ export const useGameStore = create<GameState>()(
           const newStats: LifetimeStats = {
             ...ls,
             totalRounds: ls.totalRounds + 1,
-            totalTrades: ls.totalTrades + stats.tradesWon + stats.tradesLost,
+            totalTrades: ls.totalTrades + (stats.tradesMade ?? stats.tradesWon + stats.tradesLost),
             tradesWon: ls.tradesWon + stats.tradesWon,
             tradesLost: ls.tradesLost + stats.tradesLost,
             liquidations: stats.wasLiquidated ? ls.liquidations + 1 : ls.liquidations,
@@ -243,6 +260,14 @@ export const useGameStore = create<GameState>()(
     {
       name: 'stonks-game-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      merge: (persistedState, currentState) => {
+        const stored = (persistedState ?? {}) as Partial<GameState>;
+        return {
+          ...currentState,
+          ...stored,
+          lifetimeStats: mergeLifetimeStats(stored.lifetimeStats),
+        };
+      },
     }
   )
 );

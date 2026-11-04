@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import TwemojiSkull from "../../assets/twemoji/1f480.svg";
@@ -23,7 +23,7 @@ export type MarginCallOverlayProps = {
 
 export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic", onTryAgain }: MarginCallOverlayProps) => {
   const insets = useSafeAreaInsets();
-  const windowHeight = Dimensions.get("window").height;
+  const { height: windowHeight } = useWindowDimensions();
   const translateY = useSharedValue(windowHeight);
   const [rendered, setRendered] = useState(visible);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,7 +130,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <Text style={styles.mcdonaldsTagline}>i'm lovin' it™</Text>
       </View>
       <View style={[styles.mcdonaldsFooter, { paddingBottom: bottomPad }]}>
-        <UiButton title="Submit Application" onPress={onTryAgain} variant="borderedProminent" color="#FFC72C" controlSize="large" darkMode />
+        <UiButton classic title="Submit Application" onPress={onTryAgain} variant="borderedProminent" color="#FFC72C" controlSize="large" darkMode />
       </View>
     </>
   );
@@ -145,7 +145,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <View style={styles.callButtons}>
           <View style={styles.callButtonCol}>
             <View style={styles.callButtonWrap}>
-              <UiButton
+              <UiButton classic
                 title=""
                 onPress={onTryAgain}
                 variant="borderedProminent"
@@ -162,7 +162,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
           </View>
           <View style={styles.callButtonCol}>
             <View style={styles.callButtonWrap}>
-              <UiButton
+              <UiButton classic
                 title=""
                 onPress={onTryAgain}
                 variant="borderedProminent"
@@ -224,7 +224,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
           </View>
         </View>
         <View style={[styles.newspaperFooter, { paddingBottom: bottomPad }]}>
-          <UiButton title="Try again" onPress={onTryAgain} variant="borderedProminent" color="#2d2d2d" controlSize="large" />
+          <UiButton classic title="Try again" onPress={onTryAgain} variant="borderedProminent" color="#2d2d2d" controlSize="large" />
         </View>
       </>
     );
@@ -253,7 +253,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         </View>
       </View>
       <View style={[styles.instructionFooter, { paddingBottom: bottomPad }]}>
-        <UiButton title="I should've read this first" onPress={onTryAgain} variant="borderedProminent" color="#4a4a8a" controlSize="large" darkMode />
+        <UiButton classic title="I should've read this first" onPress={onTryAgain} variant="borderedProminent" color="#4a4a8a" controlSize="large" darkMode />
       </View>
     </>
   );
@@ -273,7 +273,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <Text style={styles.mirrorAttribution}>— Your reflection</Text>
       </View>
       <View style={[styles.mirrorFooter, { paddingBottom: bottomPad }]}>
-        <UiButton title="*wipes single tear*" onPress={onTryAgain} variant="borderedProminent" color="#5a5a8a" controlSize="large" darkMode />
+        <UiButton classic title="*wipes single tear*" onPress={onTryAgain} variant="borderedProminent" color="#5a5a8a" controlSize="large" darkMode />
       </View>
     </>
   );
@@ -331,6 +331,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     width: "100%",
+    maxWidth: 640,
+    alignSelf: "center",
     paddingHorizontal: 16,
   },
 

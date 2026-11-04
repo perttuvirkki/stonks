@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { Dimensions, StyleSheet, View } from "react-native";
+import { StyleSheet, View, useWindowDimensions } from "react-native";
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withDelay, withSequence, withTiming } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import TwemojiCoin from "../../assets/twemoji/1fa99.svg";
@@ -22,12 +22,11 @@ type Particle = {
   speed: number;
 };
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const PARTICLE_COUNT = 18;
 const ANIMATION_DURATION = 2000;
 const FADE_OUT_DURATION = 400;
 
-const CoinParticle = memo(({ particle }: { particle: Particle }) => {
+const CoinParticle = memo(({ particle, screenHeight }: { particle: Particle; screenHeight: number }) => {
   const translateY = useSharedValue(-particle.size);
   const rotate = useSharedValue(0);
   const opacity = useSharedValue(1);
@@ -35,7 +34,7 @@ const CoinParticle = memo(({ particle }: { particle: Particle }) => {
   useEffect(() => {
     translateY.value = withDelay(
       particle.delay,
-      withTiming(SCREEN_HEIGHT + particle.size, {
+      withTiming(screenHeight + particle.size, {
         duration: particle.speed,
         easing: Easing.in(Easing.quad),
       })
@@ -47,7 +46,7 @@ const CoinParticle = memo(({ particle }: { particle: Particle }) => {
         easing: Easing.linear,
       })
     );
-  }, []);
+  }, [particle.delay, particle.rotation, particle.size, particle.speed, rotate, screenHeight, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: particle.x }, { translateY: translateY.value }, { rotate: `${rotate.value}deg` }],
@@ -61,7 +60,7 @@ const CoinParticle = memo(({ particle }: { particle: Particle }) => {
   );
 });
 
-const CashParticle = memo(({ particle }: { particle: Particle }) => {
+const CashParticle = memo(({ particle, screenHeight }: { particle: Particle; screenHeight: number }) => {
   const translateY = useSharedValue(-particle.size);
   const translateX = useSharedValue(0);
   const rotate = useSharedValue(particle.rotation * 30 - 15);
@@ -69,7 +68,7 @@ const CashParticle = memo(({ particle }: { particle: Particle }) => {
   useEffect(() => {
     translateY.value = withDelay(
       particle.delay,
-      withTiming(SCREEN_HEIGHT + particle.size, {
+      withTiming(screenHeight + particle.size, {
         duration: particle.speed,
         easing: Easing.in(Easing.quad),
       })
@@ -83,7 +82,7 @@ const CashParticle = memo(({ particle }: { particle: Particle }) => {
         withTiming(0, { duration: particle.speed / 4, easing: Easing.inOut(Easing.sin) })
       )
     );
-  }, []);
+  }, [particle.delay, particle.size, particle.speed, screenHeight, translateX, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: particle.x + translateX.value }, { translateY: translateY.value }, { rotate: `${rotate.value}deg` }],
@@ -96,8 +95,8 @@ const CashParticle = memo(({ particle }: { particle: Particle }) => {
   );
 });
 
-const RocketParticle = memo(({ particle }: { particle: Particle }) => {
-  const translateY = useSharedValue(SCREEN_HEIGHT + particle.size);
+const RocketParticle = memo(({ particle, screenHeight }: { particle: Particle; screenHeight: number }) => {
+  const translateY = useSharedValue(screenHeight + particle.size);
   const scale = useSharedValue(0.5);
 
   useEffect(() => {
@@ -115,7 +114,7 @@ const RocketParticle = memo(({ particle }: { particle: Particle }) => {
         easing: Easing.out(Easing.back(2)),
       })
     );
-  }, []);
+  }, [particle.delay, particle.size, particle.speed, scale, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: particle.x }, { translateY: translateY.value }, { scale: scale.value }, { rotate: "-45deg" }],
@@ -129,6 +128,7 @@ const RocketParticle = memo(({ particle }: { particle: Particle }) => {
 });
 
 export const AnimatedSplash = memo(({ onComplete, darkMode }: AnimatedSplashProps) => {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [visible, setVisible] = useState(true);
   const containerOpacity = useSharedValue(1);
 
@@ -140,13 +140,13 @@ export const AnimatedSplash = memo(({ onComplete, darkMode }: AnimatedSplashProp
   const particles = useMemo<Particle[]>(() => {
     return Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
       id: i,
-      x: Math.random() * (SCREEN_WIDTH - 60),
+      x: Math.random() * Math.max(0, screenWidth - 60),
       delay: Math.random() * 600,
       size: 40 + Math.random() * 30,
       rotation: Math.random() * 3 + 1,
       speed: ANIMATION_DURATION + Math.random() * 800,
     }));
-  }, []);
+  }, [screenWidth]);
 
   useEffect(() => {
     const fadeOutStart = ANIMATION_DURATION + 200;
@@ -189,10 +189,10 @@ export const AnimatedSplash = memo(({ onComplete, darkMode }: AnimatedSplashProp
   }
 
   return (
-    <Animated.View pointerEvents="none" style={[styles.container, containerStyle, { backgroundColor: darkMode ? "#0d0f12" : "#ffffff" }]}>
-      {animationType === "coins" && particles.map((p) => <CoinParticle key={p.id} particle={p} />)}
-      {animationType === "cash" && particles.map((p) => <CashParticle key={p.id} particle={p} />)}
-      {animationType === "rockets" && particles.map((p) => <RocketParticle key={p.id} particle={p} />)}
+    <Animated.View pointerEvents="none" style={[styles.container, containerStyle, { backgroundColor: darkMode ? "#000000" : "#ffffff" }]}>
+      {animationType === "coins" && particles.map((p) => <CoinParticle key={p.id} particle={p} screenHeight={screenHeight} />)}
+      {animationType === "cash" && particles.map((p) => <CashParticle key={p.id} particle={p} screenHeight={screenHeight} />)}
+      {animationType === "rockets" && particles.map((p) => <RocketParticle key={p.id} particle={p} screenHeight={screenHeight} />)}
     </Animated.View>
   );
 });
@@ -201,7 +201,7 @@ AnimatedSplash.displayName = "AnimatedSplash";
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#ffffff",
     zIndex: 100,
   },

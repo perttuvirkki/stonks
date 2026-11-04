@@ -2,7 +2,6 @@ import "react-native-reanimated";
 import { configureReanimatedLogger, ReanimatedLogLevel } from "react-native-reanimated";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { StatusBar } from "expo-status-bar";
 import { StyleSheet } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { RevenueCatProvider } from "../src/contexts/RevenueCatContext";
@@ -37,7 +36,6 @@ export default function Layout() {
     <SafeAreaProvider style={styles.container}>
       <RevenueCatProvider>
         <Stack screenOptions={{ headerShown: false }} />
-        <StatusBar style="auto" />
       </RevenueCatProvider>
     </SafeAreaProvider>
   );

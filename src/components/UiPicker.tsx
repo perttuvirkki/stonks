@@ -1,7 +1,8 @@
 import { memo } from "react";
-import { Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import * as Haptics from "expo-haptics";
-import { getContrastingTextColor } from "./uiColors";
+import { TERMINAL_FONT, getTerminalPalette } from "../theme/terminal";
+import { getReadableTextOn } from "./uiColors";
 
 export type UiPickerProps = {
   options: string[];
@@ -13,57 +14,38 @@ export type UiPickerProps = {
   darkMode?: boolean;
 };
 
+// Terminal-style segmented control: square cells split by hairlines, the
+// selected cell filled with the accent colour.
 export const UiPicker = memo(({ options, selectedIndex, onSelect, variant = "segmented", color, style, darkMode }: UiPickerProps) => {
   if (variant !== "segmented") {
     return null;
   }
 
-  const activeColor = color ?? "#1a9f7a";
-  const containerBorder = darkMode ? "#2b2f35" : "#dddddd";
-  const containerBg = darkMode ? "#12151a" : "#f4f5f6";
-  const inactiveText = darkMode ? "#cfd3d8" : "#444444";
+  const palette = getTerminalPalette(darkMode);
+  const accent = color ?? palette.amber;
 
   return (
-    <View
-      style={[
-        {
-          flexDirection: "row",
-          borderRadius: 12,
-          overflow: "hidden",
-          borderWidth: 1,
-          borderColor: containerBorder,
-          backgroundColor: containerBg,
-        },
-        style,
-      ]}
-    >
+    <View style={[styles.row, { borderColor: palette.borderStrong, backgroundColor: palette.panel }, style]}>
       {options.map((option, index) => {
-        const isActive = selectedIndex === index;
+        const selected = index === selectedIndex;
         return (
           <Pressable
-            key={index}
+            key={`${option}-${index}`}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              void Haptics.selectionAsync();
               onSelect(index);
             }}
             style={({ pressed }) => [
-              {
-                flex: 1,
-                paddingVertical: 8,
-                paddingHorizontal: 10,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: isActive ? activeColor : "transparent",
-                opacity: pressed ? 0.85 : 1,
-              },
+              styles.cell,
+              index > 0 && { borderLeftWidth: 1, borderLeftColor: palette.border },
+              { backgroundColor: selected ? accent : pressed ? palette.panelAlt : "transparent" },
             ]}
           >
             <Text
-              style={{
-                fontSize: 12,
-                fontWeight: "700",
-                color: isActive ? getContrastingTextColor(activeColor, "#ffffff") : inactiveText,
-              }}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+              style={[styles.label, { color: selected ? getReadableTextOn(accent) : palette.text }]}
             >
               {option}
             </Text>
@@ -75,3 +57,24 @@ export const UiPicker = memo(({ options, selectedIndex, onSelect, variant = "seg
 });
 
 UiPicker.displayName = "UiPicker";
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  cell: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  label: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+});

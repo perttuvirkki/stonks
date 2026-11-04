@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { BackHandler, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { UiButton } from "./UiButton";
@@ -21,7 +21,7 @@ export type SettingsMenuModalProps = {
 
 export const SettingsMenuModal = memo(({ visible, darkMode, title, options, onClose }: SettingsMenuModalProps) => {
   const insets = useSafeAreaInsets();
-  const windowHeight = Dimensions.get("window").height;
+  const { height: windowHeight } = useWindowDimensions();
   const translateY = useSharedValue(windowHeight);
   const [rendered, setRendered] = useState(visible);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,7 +123,7 @@ SettingsMenuModal.displayName = "SettingsMenuModal";
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 70,
   },
   header: {
@@ -154,8 +154,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 10,
+    alignItems: "center",
   },
   optionRow: {
+    width: "100%",
+    maxWidth: 720,
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
@@ -166,9 +169,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   footer: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
     paddingHorizontal: 20,
     paddingTop: 16,
     borderTopWidth: 1,
   },
 });
-

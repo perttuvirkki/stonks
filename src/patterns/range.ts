@@ -171,7 +171,7 @@ export const rangePattern: PatternDefinition = {
   generate: (startPrice: number): PatternResult => {
     const { candles, rangeHigh, rangeLow, breakoutDirection } = generateRange(startPrice, PATTERN_LENGTH);
     const lastCandle = candles[candles.length - 1];
-    const targetPrice = breakoutDirection === "up" ? lastCandle.close * 1.02 : lastCandle.close * 0.98;
+    const targetPrice = clamp(breakoutDirection === "up" ? lastCandle.close * 1.02 : lastCandle.close * 0.98, MIN_PRICE, MAX_PRICE);
 
     const lines: PatternLine[] = [
       {

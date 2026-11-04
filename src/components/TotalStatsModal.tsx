@@ -1,9 +1,11 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useGameStore, type LifetimeStats } from "../stores/useGameStore";
 import { UiButton } from "./UiButton";
+import { EmojiText } from "./Twemoji";
+import { TERMINAL_DARK, TERMINAL_FONT, TERMINAL_LIGHT, getTerminalPalette } from "../theme/terminal";
 
 type TotalStatsModalProps = {
   visible: boolean;
@@ -35,13 +37,14 @@ type StatRowProps = {
 };
 
 const StatRow = memo(({ label, value, darkMode, highlight }: StatRowProps) => {
-  const valueColor = 
-    highlight === "profit" ? "#1a9f7a" :
-    highlight === "loss" ? "#d94b4b" :
-    darkMode ? "#f5f5f5" : "#111111";
+  const palette = getTerminalPalette(darkMode);
+  const valueColor =
+    highlight === "profit" ? palette.green :
+    highlight === "loss" ? palette.red :
+    palette.text;
 
   return (
-    <View style={styles.statRow}>
+    <View style={[styles.statRow, { borderBottomColor: palette.border }]}>
       <Text style={[styles.statLabel, darkMode && styles.statLabelDark]}>{label}</Text>
       <Text style={[styles.statValue, { color: valueColor }]}>{value}</Text>
     </View>
@@ -60,7 +63,7 @@ SectionHeader.displayName = "SectionHeader";
 
 export const TotalStatsModal = memo(({ visible, darkMode, onClose }: TotalStatsModalProps) => {
   const insets = useSafeAreaInsets();
-  const windowHeight = Dimensions.get("window").height;
+  const { height: windowHeight } = useWindowDimensions();
   const translateY = useSharedValue(windowHeight);
   const [rendered, setRendered] = useState(visible);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,17 +117,18 @@ export const TotalStatsModal = memo(({ visible, darkMode, onClose }: TotalStatsM
   const netProfit = stats.totalProfit - stats.totalLoss;
   const bottomPad = Math.max(16, insets.bottom + 12);
   const topPad = Math.max(16, insets.top + 32);
-  const background = darkMode ? "#0d0f12" : "#ffffff";
-  const textPrimary = darkMode ? "#f5f5f5" : "#111111";
-  const textSecondary = darkMode ? "#b8bec6" : "#666666";
-  const activeColor = "#1a9f7a";
+  const palette = getTerminalPalette(darkMode);
+  const background = palette.bg;
+  const textPrimary = palette.amber;
+  const textSecondary = palette.textDim;
+  const activeColor = palette.amber;
 
   return (
     <Animated.View style={[styles.overlay, animatedStyle, { backgroundColor: background }]}>
       <View style={[styles.content, { paddingTop: topPad }]}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={[styles.title, { color: textPrimary }]}>📊 Total Stats</Text>
+          <EmojiText style={[styles.title, { color: textPrimary }]}>📊 Total Stats</EmojiText>
           <Text style={[styles.subtitle, { color: textSecondary }]}>Your Lifetime Performance</Text>
         </View>
 
@@ -218,6 +222,7 @@ export const TotalStatsModal = memo(({ visible, darkMode, onClose }: TotalStatsM
           variant="borderedProminent"
           color={activeColor}
           controlSize="large"
+          darkMode={darkMode}
         />
       </View>
     </Animated.View>
@@ -228,7 +233,7 @@ TotalStatsModal.displayName = "TotalStatsModal";
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 50,
   },
   content: {
@@ -238,57 +243,76 @@ const styles = StyleSheet.create({
   header: {
     alignItems: "center",
     marginBottom: 20,
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
   },
   title: {
-    fontSize: 28,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 24,
     fontWeight: "800",
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
     marginBottom: 4,
   },
   subtitle: {
-    fontSize: 15,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
     fontWeight: "500",
+    textTransform: "uppercase",
   },
   scrollView: {
     flex: 1,
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
   },
   sectionHeader: {
-    marginTop: 24,
-    marginBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e6e6e6",
-    paddingBottom: 8,
+    marginTop: 20,
+    marginBottom: 4,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    backgroundColor: TERMINAL_LIGHT.header,
   },
   sectionHeaderDark: {
-    borderBottomColor: "#2b2f35",
+    backgroundColor: TERMINAL_DARK.header,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#666666",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "800",
+    color: TERMINAL_LIGHT.headerText,
     textTransform: "uppercase",
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
   sectionTitleDark: {
-    color: "#9aa0a6",
+    color: TERMINAL_DARK.headerText,
   },
   statRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
   },
   statLabel: {
-    fontSize: 16,
-    color: "#444444",
+    fontFamily: TERMINAL_FONT,
+    fontSize: 13,
+    color: TERMINAL_LIGHT.textDim,
   },
   statLabelDark: {
-    color: "#b0b5bd",
+    color: TERMINAL_DARK.textDim,
   },
   statValue: {
-    fontSize: 16,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 15,
     fontWeight: "700",
   },
   footer: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
     paddingHorizontal: 20,
     paddingTop: 12,
   },

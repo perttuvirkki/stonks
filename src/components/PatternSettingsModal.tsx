@@ -1,8 +1,22 @@
 import React, { memo, useEffect, useRef, useState } from "react";
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { UiButton } from "./UiButton";
+import { EmojiText } from "./Twemoji";
+import { TERMINAL_FONT, getTerminalPalette, type TerminalPalette } from "../theme/terminal";
+
+// Square ON/OFF readout in place of a native switch; the whole row is the tap target.
+const TerminalToggle = ({ value, palette }: { value: boolean; palette: TerminalPalette }) => (
+  <View
+    style={[
+      styles.toggle,
+      { borderColor: value ? palette.green : palette.borderStrong, backgroundColor: value ? palette.green : "transparent" },
+    ]}
+  >
+    <Text style={[styles.toggleText, { color: value ? "#000000" : palette.textDim }]}>{value ? "ON" : "OFF"}</Text>
+  </View>
+);
 
 export type PatternLike = { id: string; label: string };
 
@@ -19,7 +33,7 @@ export type PatternSettingsModalProps = {
 
 export const PatternSettingsModal = memo(({ visible, darkMode, patterns, enabledPatternIds, togglePattern, showPatternLines, onTogglePatternLines, onClose }: PatternSettingsModalProps) => {
   const insets = useSafeAreaInsets();
-  const windowHeight = Dimensions.get("window").height;
+  const { height: windowHeight } = useWindowDimensions();
   const translateY = useSharedValue(windowHeight);
   const [rendered, setRendered] = useState(visible);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,18 +101,19 @@ export const PatternSettingsModal = memo(({ visible, darkMode, patterns, enabled
   const bottomPad = Math.max(16, insets.bottom + 12);
   const topPad = Math.max(16, insets.top + 8);
 
-  const background = darkMode ? "#0d0f12" : "#ffffff";
-  const textPrimary = darkMode ? "#f5f5f5" : "#111111";
-  const textSecondary = darkMode ? "#b8bec6" : "#666666";
-  const borderColor = darkMode ? "#1f2329" : "#eeeeee";
-  const activeColor = "#1a9f7a";
-  const rowBg = darkMode ? "#15181d" : "#f8f8f8";
+  const palette = getTerminalPalette(darkMode);
+  const background = palette.bg;
+  const textPrimary = palette.text;
+  const textSecondary = palette.textDim;
+  const borderColor = palette.border;
+  const activeColor = palette.amber;
+  const rowBg = palette.panel;
 
   return (
     <Animated.View style={[styles.overlay, animatedStyle, { backgroundColor: background }]}>
       <View style={[styles.header, { paddingTop: topPad, borderBottomColor: borderColor }]}>
         <View style={styles.headerLeft}>
-          <Text style={[styles.title, { color: textPrimary }]}>Patterns</Text>
+          <Text style={[styles.title, { color: palette.amber }]}>Patterns</Text>
           <Text style={[styles.subtitle, { color: textSecondary }]}>
             {enabledCount} of {totalCount} enabled
           </Text>
@@ -131,12 +146,10 @@ export const PatternSettingsModal = memo(({ visible, darkMode, patterns, enabled
         onPress={onTogglePatternLines}
       >
         <View style={styles.trainingWheelsLeft}>
-          <Text style={[styles.trainingWheelsLabel, { color: textPrimary }]}>Training Wheels 🛞</Text>
+          <EmojiText style={[styles.trainingWheelsLabel, { color: textPrimary }]}>Training Wheels 🛞</EmojiText>
           <Text style={[styles.trainingWheelsDesc, { color: textSecondary }]}>Show pattern lines on chart</Text>
         </View>
-        <View style={[styles.toggle, showPatternLines && { backgroundColor: activeColor, borderColor: activeColor }]}>
-          {showPatternLines && <Text style={styles.checkmark}>✓</Text>}
-        </View>
+        <TerminalToggle value={showPatternLines} palette={palette} />
       </Pressable>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -149,16 +162,14 @@ export const PatternSettingsModal = memo(({ visible, darkMode, patterns, enabled
               onPress={() => togglePattern(pattern.id)}
             >
               <Text style={[styles.patternLabel, { color: textPrimary }]}>{pattern.label}</Text>
-              <View style={[styles.toggle, isEnabled && { backgroundColor: activeColor, borderColor: activeColor }]}>
-                {isEnabled && <Text style={styles.checkmark}>✓</Text>}
-              </View>
+              <TerminalToggle value={isEnabled} palette={palette} />
             </Pressable>
           );
         })}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: bottomPad, borderTopColor: borderColor }]}>
-        <UiButton title="Done" onPress={onClose} variant="borderedProminent" color={activeColor} controlSize="large" />
+        <UiButton title="Done" onPress={onClose} variant="borderedProminent" color={activeColor} controlSize="large" darkMode={darkMode} />
       </View>
     </Animated.View>
   );
@@ -166,7 +177,7 @@ export const PatternSettingsModal = memo(({ visible, darkMode, patterns, enabled
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 50,
   },
   header: {
@@ -188,13 +199,30 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   title: {
-    fontSize: 28,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 24,
     fontWeight: "800",
-    letterSpacing: -0.5,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
   },
   subtitle: {
-    fontSize: 14,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
     marginTop: 4,
+  },
+  toggle: {
+    minWidth: 48,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderRadius: 2,
+    alignItems: "center",
+  },
+  toggleText: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1,
   },
   scrollView: {
     flex: 1,
@@ -202,60 +230,58 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    gap: 8,
+    gap: 0,
+    alignItems: "center",
   },
   patternRow: {
+    width: "100%",
+    maxWidth: 720,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
   patternLabel: {
-    fontSize: 16,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 14,
     fontWeight: "600",
   },
-  toggle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "#aaa",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkmark: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
   footer: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
     paddingHorizontal: 20,
     paddingTop: 16,
     borderTopWidth: 1,
   },
   trainingWheelsRow: {
+    width: "90%",
+    maxWidth: 720,
+    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginHorizontal: 16,
+    marginHorizontal: 0,
     marginTop: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 2,
     borderWidth: 1,
   },
   trainingWheelsLeft: {
     flex: 1,
   },
   trainingWheelsLabel: {
-    fontSize: 16,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 14,
     fontWeight: "700",
+    textTransform: "uppercase",
   },
   trainingWheelsDesc: {
-    fontSize: 13,
+    fontFamily: TERMINAL_FONT,
+    fontSize: 12,
     marginTop: 2,
   },
 });
