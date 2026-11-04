@@ -71,6 +71,9 @@ import TwemojiWrench from "../assets/twemoji/1f527.svg";
 import TwemojiFreezingFace from "../assets/twemoji/1f976.svg";
 import TwemojiHotFace from "../assets/twemoji/1f975.svg";
 import TwemojiSkull from "../assets/twemoji/1f480.svg";
+import TwemojiTarget from "../assets/twemoji/1f3af.svg";
+import TwemojiBrain from "../assets/twemoji/1f9e0.svg";
+import TwemojiMedal from "../assets/twemoji/1f3c5.svg";
 import type { ButtonVariant } from "../src/components/UiButton";
 import { UiButton } from "../src/components/UiButton";
 import { getReadableTextOn } from "../src/components/uiColors";
@@ -79,6 +82,7 @@ import { allPatterns, choosePattern } from "../src/patterns";
 import type { Candle, PatternLineKind } from "../src/types";
 import { createCandle } from "../src/utils";
 import * as GameCenter from "../src/services/GameCenterService";
+import { allTimeNetProfit, compoundTrainingReturn, progressFor, type ProgressEvent } from "../src/progress";
 
 type ChartBar = {
   time: number;
@@ -1418,10 +1422,36 @@ function AppContent() {
   const addScore = useGameStore((state) => state.addScore);
   const recordRoundEnd = useGameStore((state) => state.recordRoundEnd);
   const recordTrade = useGameStore((state) => state.recordTrade);
+  // Leaderboards and achievements. Reads the store directly so timers and stale closures
+  // always see the latest lifetime stats and unlocked achievements.
+  const reportProgress = (event: ProgressEvent) => {
+    const { unlockedAchievements, markAchievementsUnlocked } = useGameStore.getState();
+    void GameCenter.reportProgress(progressFor(event), unlockedAchievements).then((keys) => {
+      if (keys.length) {
+        markAchievementsUnlocked(keys);
+      }
+    });
+  };
+  const lifetimeNetProgress = () => {
+    const stats = useGameStore.getState().lifetimeStats;
+    return { netProfit: allTimeNetProfit(stats), totalRounds: stats.totalRounds };
+  };
+  const resetTrainingSession = () => {
+    trainingReturnRef.current = 0;
+    setTrainingReturn(0);
+    setTrainingTally({ trades: 0, wins: 0 });
+  };
+  /** Fold one closed (or liquidated) training trade into the session score. */
+  const recordTrainingTrade = (profit: number) => {
+    const stack = stackBalanceRef.current;
+    const next = compoundTrainingReturn(trainingReturnRef.current, profit, stack);
+    trainingReturnRef.current = next;
+    setTrainingReturn(next);
+    setTrainingTally((prev) => ({ trades: prev.trades + 1, wins: prev.wins + (profit > 0 ? 1 : 0) }));
+    reportProgress({ type: "tradeClosed", training: true, profit, trainingReturnPercent: next });
+  };
   const recordLeverageUse = useGameStore((state) => state.recordLeverageUse);
   const lifetimeRounds = useGameStore((state) => state.lifetimeStats.totalRounds);
-  const lifetimeTotalProfit = useGameStore((state) => state.lifetimeStats.totalProfit);
-  const lifetimeTotalLoss = useGameStore((state) => state.lifetimeStats.totalLoss);
   const quoteStackBonusTotal = useGameStore((state) => state.quoteStackBonusTotal);
   const quotePendingProBonus = useGameStore((state) => state.quotePendingProBonus);
   const dailyQuoteLastClaimDayKey = useGameStore((state) => state.dailyQuoteLastClaimDayKey);
@@ -1545,6 +1575,10 @@ function AppContent() {
   const quizPausedRef = useRef(false);
   const quizRevealLinesRef = useRef(false);
   const quizIdRef = useRef(0);
+  // Training Wheels: no money moves, the session is scored as a compounded % return instead.
+  const [trainingReturn, setTrainingReturn] = useState(0);
+  const trainingReturnRef = useRef(0);
+  const [trainingTally, setTrainingTally] = useState({ trades: 0, wins: 0 });
   const [rocketBurstTrigger, setRocketBurstTrigger] = useState(0);
   const [moneyPrinterTrigger, setMoneyPrinterTrigger] = useState(0);
   const toastTranslateY = useSharedValue(TOP_SHEET_OFFSET);
@@ -1921,12 +1955,6 @@ function AppContent() {
     setRoundResult({ startNetWorth, endNetWorth, profit, percent, durationMs, stats: { ...roundStatsRef.current } });
     setTickMs(ROUND_END_SLOW_TICK_MS);
 
-    // Submit score to Game Center
-    GameCenter.submitScore(GameCenter.LEADERBOARDS.HIGH_SCORE, endNetWorth);
-    // Submit all-time net profit (current lifetime stats + this round's profit)
-    const allTimeNetProfit = lifetimeTotalProfit - lifetimeTotalLoss + profit;
-    GameCenter.submitScore(GameCenter.LEADERBOARDS.NET_PROFIT, Math.round(allTimeNetProfit));
-
     // Save score to local leaderboard
     addScore(endNetWorth);
 
@@ -1942,6 +1970,17 @@ function AppContent() {
         wasLiquidated: false,
         closestToLiquidation: roundStatsRef.current.closestToLiquidation,
         durationMs,
+      });
+      // Leaderboards read the lifetime stats this round just updated: only the 60s sprint goes
+      // to the sprint board, and all-time net profit is reported as its new (possibly lower) value.
+      reportProgress({
+        type: "roundEnded",
+        mode: roundModeRef.current === "fiveTrades" ? "fiveTrades" : "sprint60",
+        endNetWorth,
+        percent,
+        tradesMade: roundStatsRef.current.tradesMade,
+        tradesWon: roundStatsRef.current.tradesWon,
+        ...lifetimeNetProgress(),
       });
     }
 
@@ -1970,6 +2009,14 @@ function AppContent() {
     setStackBalance(nextBalance);
     sendPatternLines();
     webViewRef.current?.injectJavaScript(`window.__addTrade && window.__addTrade("sell"); true;`);
+
+    if (costBasis > 0) {
+      if (showPatternLinesRef.current) {
+        recordTrainingTrade(profit);
+      } else {
+        reportProgress({ type: "tradeClosed", training: false, profit });
+      }
+    }
 
     // Track trade stats during active rounds.
     if (roundEndsAtRef.current && costBasis > 0) {
@@ -2313,23 +2360,45 @@ function AppContent() {
       },
       {
         id: "globalLeaderboard",
-        label: "Global Leaderboard (Best Round)",
-        subtitle: "Compare your best run worldwide.",
+        label: "Leaderboard: 60s Sprint",
+        subtitle: "Best end-of-round stack worldwide.",
         icon: TwemojiChartUp,
-        onPress: () => GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE),
+        onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.HIGH_SCORE),
+      },
+      {
+        id: "fiveTradesLeaderboard",
+        label: "Leaderboard: 5 Trades",
+        subtitle: "Best 5-trade run return.",
+        icon: TwemojiTarget,
+        onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.FIVE_TRADES),
+      },
+      {
+        id: "quizLeaderboard",
+        label: "Leaderboard: Pop Quiz",
+        subtitle: "Longest streak of correct calls.",
+        icon: TwemojiBrain,
+        onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.QUIZ_STREAK),
+      },
+      {
+        id: "trainingLeaderboard",
+        label: "Leaderboard: Training Wheels",
+        subtitle: "Best training session return.",
+        icon: TwemojiWheel,
+        onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.TRAINING_RETURN),
       },
       {
         id: "globalProfitLeaderboard",
-        label: "Global Leaderboard (All-Time Profit)",
-        subtitle: "See where your long-term profit ranks.",
+        label: "Leaderboard: All-Time Profit",
+        subtitle: "Net profit across every round you've played.",
         icon: TwemojiMoneyBag,
-        onPress: () => {
-          if (!GameCenter.LEADERBOARDS.NET_PROFIT) {
-            Alert.alert("Not set up yet", "Add LEADERBOARD_NET_PROFIT_ANDROID / LEADERBOARD_NET_PROFIT_IOS to enable this leaderboard.");
-            return;
-          }
-          GameCenter.showLeaderboard(GameCenter.LEADERBOARDS.NET_PROFIT);
-        },
+        onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.NET_PROFIT),
+      },
+      {
+        id: "achievements",
+        label: "Achievements",
+        subtitle: "See what you've unlocked.",
+        icon: TwemojiMedal,
+        onPress: () => void GameCenter.showAchievements(),
       },
     ];
 
@@ -2458,6 +2527,7 @@ function AppContent() {
 
     setIsMarginCallVisible(false);
     resetRoundState();
+    resetTrainingSession();
 
     stackBalanceRef.current = initialStackBalance;
     setStackBalance(initialStackBalance);
@@ -2544,6 +2614,7 @@ function AppContent() {
       if (leverage > 1) {
         recordLeverageUse(leverage);
       }
+      reportProgress({ type: "tradeOpened", training: false, leverage });
     }
     sendPatternLines();
     const markerSide = useLeverage ? side : "buy";
@@ -2903,6 +2974,9 @@ function AppContent() {
             const capturedStats = { ...roundStatsRef.current };
             const capturedRoundStartedAt = roundStartedAtRef.current;
             const margin = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
+            if (showPatternLinesRef.current) {
+              recordTrainingTrade(-margin);
+            }
 
             resetRoundState();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -2933,6 +3007,7 @@ function AppContent() {
                   durationMs: capturedRoundStartedAt ? Math.max(0, Date.now() - capturedRoundStartedAt) : ROUND_DURATION_MS,
                   liquidationLeverage: liquidatedLeverage,
                 });
+                reportProgress({ type: "liquidated", ...lifetimeNetProgress() });
               }
             }, 900);
             shouldUpdateLines = true;
@@ -2969,7 +3044,11 @@ function AppContent() {
     sendPatternLines();
   }, [showPatternLines, isWebReady]);
 
-  const toastTitle = tradeToast ? `${lastTradeLabelRef.current}  ${formatSignedMoney(tradeToast.amount)}` : "";
+  const toastTitle = tradeToast
+    ? showPatternLines
+      ? `${lastTradeLabelRef.current}  SESSION ${trainingReturn > 0 ? "+" : ""}${trainingReturn.toFixed(2)}%`
+      : `${lastTradeLabelRef.current}  ${formatSignedMoney(tradeToast.amount)}`
+    : "";
   const toastSubtitle = tradeToast
     ? tradeToast.kind === "liquidation"
       ? "-100.00%"
@@ -3050,6 +3129,7 @@ function AppContent() {
     }
     const correct = isQuizAnswerCorrect(quizPrompt, side);
     setQuizPrompt({ ...quizPrompt, answer: side });
+    reportProgress({ type: "quizAnswered", correct, streak: correct ? quizScore.streak + 1 : 0 });
     setQuizScore((prev) => {
       const streak = correct ? prev.streak + 1 : 0;
       return {
@@ -3068,6 +3148,14 @@ function AppContent() {
   const resumeQuizMarket = () => {
     setQuizPrompt(null);
     quizPausedRef.current = false;
+  };
+
+  const openLeaderboard = (leaderboardId: string) => {
+    if (!leaderboardId) {
+      Alert.alert("Coming soon", "This leaderboard isn't live on this platform yet.");
+      return;
+    }
+    void GameCenter.showLeaderboard(leaderboardId);
   };
 
   const openMenuScreen = () => {
@@ -3574,6 +3662,9 @@ function AppContent() {
           wagerAmount={wagerAmount}
           roundSecondsRemaining={roundSecondsRemaining}
           trainingMode={isTrainingMode}
+          trainingReturnPercent={trainingReturn}
+          trainingTrades={trainingTally.trades}
+          trainingWins={trainingTally.wins}
           darkMode={darkMode}
           chartType={chartType}
           setChartType={applyChartType}
@@ -3701,7 +3792,7 @@ function AppContent() {
             onBuy={handleBuy}
             onSell={handleSell}
             disabled={
-              isTrainingMode ||
+              // Training Wheels is playable: trades are scored in % and never touch the stack.
               isQuizMode ||
               isRoundResultsVisible ||
               isMarginCallVisible ||
@@ -3974,6 +4065,12 @@ const styles = StyleSheet.create({
     color: "#000000",
   },
   stackTrainingTextDark: {
+    color: "#000000",
+  },
+  stackTrainingLabel: {
+    color: "#000000",
+  },
+  stackTrainingValue: {
     color: "#000000",
   },
   stackBarRight: {

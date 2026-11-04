@@ -87,6 +87,9 @@ type GameState = {
   quoteStackBonusTotal: number;
   quotePendingProBonus: number;
   dailyQuoteLastClaimDayKey: string | null;
+  /** Achievement keys already reported to Game Center / Play Games. */
+  unlockedAchievements: string[];
+  markAchievementsUnlocked: (keys: string[]) => void;
   addScore: (score: number) => void;
   clearScores: () => void;
   setIsPro: (status: boolean) => void;
@@ -122,6 +125,12 @@ export const useGameStore = create<GameState>()(
       quoteStackBonusTotal: 0,
       quotePendingProBonus: 0,
       dailyQuoteLastClaimDayKey: null,
+      unlockedAchievements: [],
+      markAchievementsUnlocked: (keys) =>
+        set((state) => {
+          const fresh = keys.filter((key) => !state.unlockedAchievements.includes(key));
+          return fresh.length ? { unlockedAchievements: [...state.unlockedAchievements, ...fresh] } : {};
+        }),
       addScore: (score) =>
         set((state) => {
           const newScore: HighScore = {

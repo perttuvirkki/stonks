@@ -10,9 +10,12 @@ export interface GameCenterPlayer {
   alias: string | null;
 }
 
-// Leaderboard IDs
-// - iOS: Game Center leaderboard identifier
-// - Android: Play Games Services leaderboard ID (looks like "CgkI...")
+import type { AchievementKey, LeaderboardKey, Progress } from "../progress";
+
+// Leaderboard and achievement IDs.
+// - iOS: Game Center identifiers, as created in App Store Connect.
+// - Android: Play Games Services IDs (look like "CgkI..."), as created in Play Console.
+// An empty ID means "not set up on that platform yet": nothing is submitted for it.
 type LeaderboardExtra = {
   leaderboardHighScoreIos?: string;
   leaderboardHighScoreAndroid?: string;
@@ -22,27 +25,69 @@ type LeaderboardExtra = {
 
 const extra = (Constants.expoConfig?.extra ?? {}) as LeaderboardExtra;
 
+type PlatformIds = { ios: string; android: string };
+
+const pick = (ids: PlatformIds) => Platform.select({ ios: ids.ios, android: ids.android }) ?? "";
+
+const LEADERBOARD_IDS: Record<LeaderboardKey, PlatformIds> = {
+  sprint: {
+    ios: extra.leaderboardHighScoreIos || "topscores1",
+    android: extra.leaderboardHighScoreAndroid || "CgkI5OK25LMEEAIQAQ",
+  },
+  netProfit: {
+    ios: extra.leaderboardNetProfitIos || "netprofit1",
+    android: extra.leaderboardNetProfitAndroid || "CgkI5OK25LMEEAIQAw",
+  },
+  fiveTrades: { ios: "fivetrades1", android: "" },
+  quizStreak: { ios: "quizstreak1", android: "" },
+  trainingReturn: { ios: "trainingreturn1", android: "" },
+};
+
+const ACHIEVEMENT_IDS: Record<AchievementKey, PlatformIds> = {
+  firstTrade: { ios: "com.ludussuper.stonks.firsttrade", android: "" },
+  leverage10x: { ios: "com.ludussuper.stonks.leverage10x", android: "" },
+  rounds100: { ios: "com.ludussuper.stonks.survive100", android: "" },
+  liquidated: { ios: "com.ludussuper.stonks.liquidated", android: "" },
+  sprintDouble: { ios: "com.ludussuper.stonks.sprintdouble", android: "" },
+  fiveTradesDone: { ios: "com.ludussuper.stonks.fivetradesdone", android: "" },
+  fiveTradesPerfect: { ios: "com.ludussuper.stonks.fivetradesperfect", android: "" },
+  fiveTradesDouble: { ios: "com.ludussuper.stonks.fivetradesdouble", android: "" },
+  quizFirstCorrect: { ios: "com.ludussuper.stonks.quizfirst", android: "" },
+  quizStreak5: { ios: "com.ludussuper.stonks.quizstreak5", android: "" },
+  quizStreak10: { ios: "com.ludussuper.stonks.quizstreak10", android: "" },
+  trainingFirstGreen: { ios: "com.ludussuper.stonks.trainingfirstgreen", android: "" },
+  trainingPlus50: { ios: "com.ludussuper.stonks.trainingplus50", android: "" },
+  netProfit1k: { ios: "com.ludussuper.stonks.netprofit1k", android: "" },
+  netProfit10k: { ios: "com.ludussuper.stonks.netprofit10k", android: "" },
+};
+
+export const leaderboardId = (key: LeaderboardKey) => pick(LEADERBOARD_IDS[key]);
+export const achievementId = (key: AchievementKey) => pick(ACHIEVEMENT_IDS[key]);
+
 export const LEADERBOARDS = {
-  // 60s sprint / one-minute challenge
-  HIGH_SCORE: Platform.select({
-    ios: extra.leaderboardHighScoreIos ?? "topscores1",
-    android: extra.leaderboardHighScoreAndroid ?? "CgkI5OK25LMEEAIQAQ",
-  }) ?? "topscores1",
-  // Net profit/loss leaderboard (configure IDs in app config / env).
-  NET_PROFIT: Platform.select({
-    ios: extra.leaderboardNetProfitIos ?? "",
-    android: extra.leaderboardNetProfitAndroid ?? "",
-  }) ?? "",
-  LONGEST_STREAK: "com.ludussuper.stonks.longeststreak",
-  BEST_TRADE: "com.ludussuper.stonks.besttrade",
+  HIGH_SCORE: leaderboardId("sprint"),
+  NET_PROFIT: leaderboardId("netProfit"),
+  FIVE_TRADES: leaderboardId("fiveTrades"),
+  QUIZ_STREAK: leaderboardId("quizStreak"),
+  TRAINING_RETURN: leaderboardId("trainingReturn"),
 } as const;
 
-// Achievement IDs - update these to match your App Store Connect configuration
-export const ACHIEVEMENTS = {
-  FIRST_TRADE: "com.ludussuper.stonks.firsttrade",
-  LEVERAGE_10X: "com.ludussuper.stonks.leverage10x",
-  SURVIVE_100: "com.ludussuper.stonks.survive100",
-} as const;
+/**
+ * Submit the scores and unlock the achievements a game event earned. Achievements in
+ * `alreadyUnlocked` are skipped so the same one isn't re-reported on every round.
+ * Resolves to the achievement keys that unlocked successfully, so the caller can remember
+ * them; failed ones (e.g. not signed in) are tried again the next time they're earned.
+ */
+export async function reportProgress(progress: Progress, alreadyUnlocked: readonly string[]): Promise<AchievementKey[]> {
+  for (const { board, score } of progress.scores) {
+    void submitScore(leaderboardId(board), score);
+  }
+  const fresh = progress.achievements.filter(
+    (key, index, all) => all.indexOf(key) === index && !alreadyUnlocked.includes(key) && achievementId(key) !== "",
+  );
+  const results = await Promise.all(fresh.map((key) => unlockAchievement(achievementId(key))));
+  return fresh.filter((_, index) => results[index]);
+}
 
 /**
  * Check if Game Center is available on this platform
@@ -213,7 +258,7 @@ export async function showAllLeaderboards(): Promise<void> {
  * @param percentComplete Progress from 0 to 100 (100 = fully unlocked)
  */
 export async function unlockAchievement(achievementID: string, percentComplete: number = 100): Promise<boolean> {
-  if (!isGameCenterAvailable()) {
+  if (!isGameCenterAvailable() || !achievementID) {
     return false;
   }
   

@@ -9,6 +9,11 @@ import TwemojiLineChart from "../../assets/twemoji/1f4c8.svg";
 import TwemojiWavyDash from "../../assets/twemoji/3030.svg";
 import TwemojiWheel from "../../assets/twemoji/1f6de.svg";
 
+// Training mode sits on the yellow bar, so its numbers use darker inks than the terminal palette.
+const TRAINING_INK = "#000000";
+const TRAINING_UP = "#06612f";
+const TRAINING_DOWN = "#a3140d";
+
 export type ChartType = "candles" | "line" | "area" | "baseline";
 
 export type StackBarProps = {
@@ -20,6 +25,10 @@ export type StackBarProps = {
   wagerAmount: number;
   roundSecondsRemaining?: number | null;
   trainingMode?: boolean;
+  /** Training Wheels session return in percent (no money changes hands in training). */
+  trainingReturnPercent?: number;
+  trainingTrades?: number;
+  trainingWins?: number;
   darkMode: boolean;
   chartType: ChartType;
   setChartType: (nextType: ChartType) => void;
@@ -39,6 +48,9 @@ export function StackBar({
   wagerAmount,
   roundSecondsRemaining,
   trainingMode = false,
+  trainingReturnPercent = 0,
+  trainingTrades = 0,
+  trainingWins = 0,
   darkMode,
   chartType,
   setChartType,
@@ -84,7 +96,22 @@ export function StackBar({
         </UiButton>
         {trainingMode ? (
           <View style={styles.stackTrainingWrap}>
-            <Text style={[styles.stackTrainingText, darkMode && styles.stackTrainingTextDark]}>Training Wheels</Text>
+            <View>
+              <Text numberOfLines={1} style={[styles.stackLabel, styles.stackTrainingLabel]}>
+                {trainingTrades > 0
+                  ? `Training P&L · ${trainingTrades} ${trainingTrades === 1 ? "trade" : "trades"} · ${Math.round((trainingWins / trainingTrades) * 100)}% won`
+                  : "Training P&L · no money"}
+              </Text>
+              <AnimatedNumber
+                value={trainingReturnPercent}
+                format={(value) => `${value > 0 ? "+" : ""}${value.toFixed(2)}%`}
+                flash
+                baseColor={TRAINING_INK}
+                upColor={TRAINING_UP}
+                downColor={TRAINING_DOWN}
+                style={[styles.stackValue, styles.stackTrainingValue]}
+              />
+            </View>
           </View>
         ) : (
           <View>
