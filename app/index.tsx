@@ -41,6 +41,8 @@ import { ProfitToast } from "../src/components/ProfitToast";
 import { RoundResultsSheet, type RoundResult, type RoundStats } from "../src/components/RoundResultsSheet";
 import { StackBar, type ChartType } from "../src/components/StackBar";
 import { RocketBurst } from "../src/components/RocketBurst";
+import { RoundTimer } from "../src/components/RoundTimer";
+import { popIn } from "../src/transitions";
 import {
   EMPTY_QUIZ_SCORE,
   PopQuizCard,
@@ -3627,16 +3629,15 @@ function AppContent() {
               ))}
             </View>
           </View>
-          {typeof roundSecondsRemaining === "number" && (
-            <View style={[styles.floatingTimer, darkMode && styles.floatingTimerDark]}>
-              <Text style={[styles.floatingTimerText, darkMode && styles.floatingTimerTextDark]}>{Math.max(0, roundSecondsRemaining)}s</Text>
-            </View>
-          )}
+          {typeof roundSecondsRemaining === "number" && <RoundTimer seconds={roundSecondsRemaining} darkMode={darkMode} />}
           {isFiveTradesMode && (
-            <View style={[styles.floatingTradeCounter, darkMode && styles.floatingTradeCounterDark]}>
-              <Text style={[styles.floatingTradeCounterText, darkMode && styles.floatingTradeCounterTextDark]}>
-                Trades: {Math.min(roundTradesMade, FIVE_TRADES_TARGET)}/{FIVE_TRADES_TARGET}
-              </Text>
+            <View pointerEvents="none" style={[styles.floatingTradeCounter, darkMode && styles.floatingTradeCounterDark]}>
+              {/* Remounts per trade so the counter pops each time it ticks up. */}
+              <Animated.View key={roundTradesMade} entering={roundTradesMade > 0 ? popIn : undefined}>
+                <Text style={[styles.floatingTradeCounterText, darkMode && styles.floatingTradeCounterTextDark]}>
+                  Trades: {Math.min(roundTradesMade, FIVE_TRADES_TARGET)}/{FIVE_TRADES_TARGET}
+                </Text>
+              </Animated.View>
             </View>
           )}
           <View style={styles.floatingFollowContainer}>
@@ -4080,15 +4081,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     borderRadius: 2,
   },
-  floatingTimer: {
-    position: "absolute",
-    top: 54,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    zIndex: 10,
-  },
-  floatingTimerDark: {},
   floatingSpeed: {
     position: "absolute",
     top: 12,
@@ -4111,23 +4103,6 @@ const styles = StyleSheet.create({
   },
   floatingSpeedButtonWide: {
     width: 58,
-  },
-  floatingTimerText: {
-    fontFamily: TERMINAL_FONT,
-    fontSize: 18,
-    fontWeight: "800",
-    color: TERMINAL_LIGHT.amber,
-    backgroundColor: TERMINAL_LIGHT.panel,
-    borderWidth: 1,
-    borderColor: TERMINAL_LIGHT.amber,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    overflow: "hidden",
-  },
-  floatingTimerTextDark: {
-    color: TERMINAL_DARK.amber,
-    backgroundColor: TERMINAL_DARK.bg,
-    borderColor: TERMINAL_DARK.amber,
   },
   floatingTradeCounter: {
     position: "absolute",

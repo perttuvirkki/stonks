@@ -1,6 +1,7 @@
-import { memo } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import * as Haptics from "expo-haptics";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { selectHaptic } from "../haptics";
 import { TERMINAL_FONT, getTerminalPalette } from "../theme/terminal";
 import { getReadableTextOn } from "./uiColors";
 
@@ -14,31 +15,65 @@ export type UiPickerProps = {
   darkMode?: boolean;
 };
 
-// Terminal-style segmented control: square cells split by hairlines, the
-// selected cell filled with the accent colour.
+// A cursor moving between cells: quick and decisive, no overshoot.
+const SLIDE_TIMING = { duration: 160, easing: Easing.out(Easing.cubic) };
+
+// Terminal-style segmented control: square cells split by hairlines, with an accent block
+// that slides to the selected cell.
 export const UiPicker = memo(({ options, selectedIndex, onSelect, variant = "segmented", color, style, darkMode }: UiPickerProps) => {
+  const [width, setWidth] = useState(0);
+  const segmentWidth = options.length > 0 ? width / options.length : 0;
+  const indicatorX = useSharedValue(0);
+  const hasPlacedRef = useRef(false);
+
+  useEffect(() => {
+    if (selectedIndex == null || segmentWidth <= 0) {
+      return;
+    }
+    const target = selectedIndex * segmentWidth;
+    // Jump into place on first layout; slide on every change after that.
+    indicatorX.value = hasPlacedRef.current ? withTiming(target, SLIDE_TIMING) : target;
+    hasPlacedRef.current = true;
+  }, [indicatorX, segmentWidth, selectedIndex]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorX.value }],
+  }));
+
   if (variant !== "segmented") {
     return null;
   }
 
   const palette = getTerminalPalette(darkMode);
   const accent = color ?? palette.amber;
+  const indicatorReady = selectedIndex != null && segmentWidth > 0;
 
   return (
-    <View style={[styles.row, { borderColor: palette.borderStrong, backgroundColor: palette.panel }, style]}>
+    <View
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width - 2)}
+      style={[styles.row, { borderColor: palette.borderStrong, backgroundColor: palette.panel }, style]}
+    >
+      {indicatorReady && (
+        <Animated.View pointerEvents="none" style={[styles.indicator, { width: segmentWidth, backgroundColor: accent }, indicatorStyle]} />
+      )}
       {options.map((option, index) => {
         const selected = index === selectedIndex;
         return (
           <Pressable
             key={`${option}-${index}`}
             onPress={() => {
-              void Haptics.selectionAsync();
+              if (!selected) {
+                selectHaptic();
+              }
               onSelect(index);
             }}
             style={({ pressed }) => [
               styles.cell,
               index > 0 && { borderLeftWidth: 1, borderLeftColor: palette.border },
-              { backgroundColor: selected ? accent : pressed ? palette.panelAlt : "transparent" },
+              {
+                // Until the first layout pass, fall back to a static fill so the selection is never invisible.
+                backgroundColor: selected && !indicatorReady ? accent : pressed && !selected ? palette.panelAlt : "transparent",
+              },
             ]}
           >
             <Text
@@ -64,6 +99,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 2,
     overflow: "hidden",
+  },
+  indicator: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
   },
   cell: {
     flex: 1,

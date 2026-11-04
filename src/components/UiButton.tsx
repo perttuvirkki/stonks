@@ -13,6 +13,7 @@ import * as Haptics from "expo-haptics";
 import { getContrastingTextColor, getReadableTextOn } from "./uiColors";
 import { TERMINAL_FONT, getTerminalPalette } from "../theme/terminal";
 import { EmojiText, hasTwemoji } from "./Twemoji";
+import { PressableScale } from "./PressableScale";
 
 export type ButtonVariant = "bordered" | "borderedProminent" | "plain";
 export type ButtonControlSize = "small" | "regular" | "large";
@@ -61,20 +62,23 @@ export const UiButton = memo(
     const terminalText = isProminent ? getReadableTextOn(terminalBackground) : color ?? (isPlain ? palette.textDim : palette.text);
 
     return (
-      <Pressable
-        onPress={handlePress}
+      <PressableScale
+        onPress={onPress}
         disabled={disabled}
-        style={({ pressed }) => [
+        // Big trade buttons press in less so they still feel solid.
+        pressedScale={size === "large" ? 0.98 : 0.96}
+        pressedStyle={!isProminent ? { backgroundColor: palette.panelAlt } : undefined}
+        style={[
           {
             minHeight: controlHeight,
-            backgroundColor: pressed && !isProminent ? palette.panelAlt : terminalBackground,
+            backgroundColor: terminalBackground,
             borderColor: terminalBorder,
             borderWidth: isPlain ? 0 : 1,
             borderRadius: 2,
             paddingHorizontal,
             alignItems: "center",
             justifyContent: "center",
-            opacity: disabled ? 0.4 : pressed ? 0.8 : 1,
+            opacity: disabled ? 0.4 : 1,
           },
           style,
         ]}
@@ -98,7 +102,7 @@ export const UiButton = memo(
             {displayTitle}
           </EmojiText>
         )}
-      </Pressable>
+      </PressableScale>
     );
   }
 
