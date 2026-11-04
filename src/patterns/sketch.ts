@@ -191,16 +191,30 @@ export class Sketch {
     return price + this.dir * Math.abs(distance);
   }
 
-  /** Add the breakout, an optional retest and the move to target, then render everything. */
+  /**
+   * Complete the formation by working price back up to the breakout line, then add the
+   * breakout, an optional retest and the move to target, and render everything.
+   */
   finish(id: string, options: FinishOptions): PatternResult {
     const { target, breakout, retestChance = 0.45, speed = 1 } = options;
-    const end = this.index;
     const level = (index: number) => lineAt(breakout, index);
-    const out = target >= level(end) ? 1 : -1;
+    const out = target >= level(this.index) ? 1 : -1;
     const kind = (up: boolean): "high" | "low" => (up ? "high" : "low");
     const push = (bars: number, price: number, pivotKind: PathPivot["kind"], volScale?: number) => {
       this.pivots.push({ index: this.index + Math.max(1, Math.round(bars)), price, kind: pivotKind, volScale });
     };
+
+    // 0. Approach: the last swing usually ends on the far side of the pattern (right shoulder,
+    // second bottom, handle low, floor touch). The pattern isn't complete until price is back
+    // at the line it will break, so that leg belongs to the formation. It stops just inside the
+    // line, which is where Pop Quiz freezes the chart.
+    const gap = Math.abs(level(this.index) - this.last);
+    if (gap > this.sigma * 1.2) {
+      const bars = Math.max(3, (gap / (this.sigma * range(0.8, 1.2))) * speed);
+      const approachIndex = this.index + Math.max(1, Math.round(bars));
+      push(bars, level(approachIndex) - out * range(0.15, 0.4) * this.sigma, "close", 0.9);
+    }
+    const end = this.index;
 
     // 1. Breakout: a fast, wide-bodied thrust through the line.
     const thrust = level(end) + out * Math.abs(target - level(end)) * range(0.35, 0.6);

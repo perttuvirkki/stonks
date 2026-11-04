@@ -97,6 +97,22 @@ test("runouts head toward the measured-move target", () => {
   }
 });
 
+test("formations end at the breakout line, not on the far side of the pattern", () => {
+  // Pop Quiz freezes on the last formation candle, so the pattern must be complete there:
+  // price back at the line it will break, but not through it yet.
+  for (const pattern of allPatterns) {
+    for (let run = 0; run < 25; run += 1) {
+      const result = pattern.generate(BASE_PRICE);
+      const lastClose = result.candles.at(-1)!.close;
+      const out = Math.sign(result.targetPrice - result.breakoutPrice);
+      const breakToTarget = Math.abs(result.targetPrice - result.breakoutPrice);
+      const distance = Math.abs(lastClose - result.breakoutPrice);
+      assert.ok(distance < breakToTarget * 0.35, `${pattern.id} formation ends near its breakout line (${distance.toFixed(1)} vs ${breakToTarget.toFixed(1)})`);
+      assert.ok((lastClose - result.breakoutPrice) * out <= breakToTarget * 0.05, `${pattern.id} formation has not broken out yet`);
+    }
+  }
+});
+
 test("each pattern keeps stochastic variation between runs", () => {
   for (const pattern of allPatterns) {
     const first = pattern.generate(BASE_PRICE).candles.map((candle) => candle.close);
