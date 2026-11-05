@@ -39,8 +39,6 @@ const LEADERBOARD_IDS: Record<LeaderboardKey, PlatformIds> = {
     android: extra.leaderboardNetProfitAndroid || "CgkI5OK25LMEEAIQAw",
   },
   fiveTrades: { ios: "fivetrades1", android: "" },
-  quizStreak: { ios: "quizstreak1", android: "" },
-  trainingReturn: { ios: "trainingreturn1", android: "" },
 };
 
 const ACHIEVEMENT_IDS: Record<AchievementKey, PlatformIds> = {
@@ -68,8 +66,6 @@ export const LEADERBOARDS = {
   HIGH_SCORE: leaderboardId("sprint"),
   NET_PROFIT: leaderboardId("netProfit"),
   FIVE_TRADES: leaderboardId("fiveTrades"),
-  QUIZ_STREAK: leaderboardId("quizStreak"),
-  TRAINING_RETURN: leaderboardId("trainingReturn"),
 } as const;
 
 /**

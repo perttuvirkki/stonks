@@ -11,9 +11,9 @@ the app skips it and the menu says "Coming soon".
 | --- | --- | --- | --- | --- |
 | 60s Sprint | `topscores1` (exists) | end-of-round stack, $ | Integer (money) | Best score, high to low |
 | All-Time Profit | `netprofit1` (exists) | all-time net profit, $ (can be negative) | Integer (money) | **Most recent score** |
-| 5 Trades | `fivetrades1` | run return × 100 (`1234` = +12.34%) | Fixed point, 2 decimals, `%` suffix | Best score, high to low |
-| Pop Quiz | `quizstreak1` | longest correct-call streak | Integer | Best score, high to low |
-| Training Wheels | `trainingreturn1` | best session return × 100 | Fixed point, 2 decimals, `%` suffix | Best score, high to low |
+| 5 Trades | `fivetrades1` | end-of-run stack, $ | Integer (money) | Best score, high to low |
+
+Pop Quiz and Training Wheels have achievements only, no leaderboards.
 
 **All-Time Profit must be "Most Recent Score".** With "Best score" Game Center keeps the
 highest value ever sent, so the board never goes down after losses or liquidations. That is
@@ -24,7 +24,7 @@ All-Time Profit board only ever shows your peak. If Play Games rejects negative 
 negative net profit simply won't be recorded there.
 
 Android IDs already in code: Sprint `CgkI5OK25LMEEAIQAQ`, All-Time Profit `CgkI5OK25LMEEAIQAw`.
-Create the other three in Play Console and paste their IDs into `LEADERBOARD_IDS`.
+Create the 5 Trades one in Play Console and paste its ID into `LEADERBOARD_IDS`.
 
 ## Achievements
 

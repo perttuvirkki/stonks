@@ -5,12 +5,8 @@
 export type LeaderboardKey =
   /** 60s Sprint: stack at the end of the round, in dollars. */
   | "sprint"
-  /** 5 Trades: return of the run, in hundredths of a percent (1234 = +12.34%). */
+  /** 5 Trades: stack at the end of the run, in dollars. */
   | "fiveTrades"
-  /** Pop Quiz: longest streak of correct calls. */
-  | "quizStreak"
-  /** Training Wheels: best session return, in hundredths of a percent. */
-  | "trainingReturn"
   /** All modes with money: all-time net profit in dollars (latest value, can go down). */
   | "netProfit";
 
@@ -54,9 +50,6 @@ export type Progress = { scores: ScoreSubmission[]; achievements: AchievementKey
 
 export const FIVE_TRADES_TARGET = 5;
 
-/** Percent as a fixed-point integer with two decimals, the format the % leaderboards use. */
-export const percentScore = (percent: number) => Math.round(percent * 100);
-
 /** All-time net profit = profit from winning rounds minus losses from losing ones. */
 export const allTimeNetProfit = (stats: { totalProfit: number; totalLoss: number }) => Math.round(stats.totalProfit - stats.totalLoss);
 
@@ -78,14 +71,11 @@ export const progressFor = (event: ProgressEvent): Progress => {
       if (!event.training) {
         return { scores: [], achievements: ["firstTrade"] };
       }
+      // Training has achievements but no leaderboard.
       const achievements: AchievementKey[] = [];
-      const scores: ScoreSubmission[] = [];
       if (event.profit > 0) achievements.push("trainingFirstGreen");
-      const sessionReturn = event.trainingReturnPercent ?? 0;
-      if (sessionReturn >= 50) achievements.push("trainingPlus50");
-      // Best-score board: only positive runs are worth reporting.
-      if (sessionReturn > 0) scores.push({ board: "trainingReturn", score: percentScore(sessionReturn) });
-      return { scores, achievements };
+      if ((event.trainingReturnPercent ?? 0) >= 50) achievements.push("trainingPlus50");
+      return { scores: [], achievements };
     }
 
     case "roundEnded": {
@@ -96,7 +86,7 @@ export const progressFor = (event: ProgressEvent): Progress => {
         scores.push({ board: "sprint", score: Math.floor(event.endNetWorth) });
         if (event.percent >= 100) achievements.push("sprintDouble");
       } else {
-        if (event.percent > 0) scores.push({ board: "fiveTrades", score: percentScore(event.percent) });
+        scores.push({ board: "fiveTrades", score: Math.floor(event.endNetWorth) });
         if (event.tradesMade >= FIVE_TRADES_TARGET) {
           achievements.push("fiveTradesDone");
           if (event.tradesWon >= FIVE_TRADES_TARGET) achievements.push("fiveTradesPerfect");
@@ -118,7 +108,8 @@ export const progressFor = (event: ProgressEvent): Progress => {
       const achievements: AchievementKey[] = ["quizFirstCorrect"];
       if (event.streak >= 5) achievements.push("quizStreak5");
       if (event.streak >= 10) achievements.push("quizStreak10");
-      return { scores: [{ board: "quizStreak", score: event.streak }], achievements };
+      // Pop Quiz has achievements but no leaderboard.
+      return { scores: [], achievements };
     }
   }
 };

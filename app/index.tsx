@@ -72,7 +72,6 @@ import TwemojiFreezingFace from "../assets/twemoji/1f976.svg";
 import TwemojiHotFace from "../assets/twemoji/1f975.svg";
 import TwemojiSkull from "../assets/twemoji/1f480.svg";
 import TwemojiTarget from "../assets/twemoji/1f3af.svg";
-import TwemojiBrain from "../assets/twemoji/1f9e0.svg";
 import TwemojiMedal from "../assets/twemoji/1f3c5.svg";
 import type { ButtonVariant } from "../src/components/UiButton";
 import { UiButton } from "../src/components/UiButton";
@@ -2368,23 +2367,9 @@ function AppContent() {
       {
         id: "fiveTradesLeaderboard",
         label: "Leaderboard: 5 Trades",
-        subtitle: "Best 5-trade run return.",
+        subtitle: "Best end-of-run stack worldwide.",
         icon: TwemojiTarget,
         onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.FIVE_TRADES),
-      },
-      {
-        id: "quizLeaderboard",
-        label: "Leaderboard: Pop Quiz",
-        subtitle: "Longest streak of correct calls.",
-        icon: TwemojiBrain,
-        onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.QUIZ_STREAK),
-      },
-      {
-        id: "trainingLeaderboard",
-        label: "Leaderboard: Training Wheels",
-        subtitle: "Best training session return.",
-        icon: TwemojiWheel,
-        onPress: () => openLeaderboard(GameCenter.LEADERBOARDS.TRAINING_RETURN),
       },
       {
         id: "globalProfitLeaderboard",

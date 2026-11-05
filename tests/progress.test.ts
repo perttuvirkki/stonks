@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { allTimeNetProfit, compoundTrainingReturn, percentScore, progressFor } from "../src/progress";
+import { allTimeNetProfit, compoundTrainingReturn, progressFor } from "../src/progress";
 
 const boards = (event: Parameters<typeof progressFor>[0]) => progressFor(event).scores.map((score) => score.board);
 
@@ -10,10 +10,10 @@ test("only the 60s sprint feeds the sprint leaderboard", () => {
   assert.deepEqual(boards({ type: "roundEnded", mode: "fiveTrades", ...common }).sort(), ["fiveTrades", "netProfit"]);
 });
 
-test("5 Trades submits its return as fixed-point percent and skips losing runs", () => {
-  const run = { type: "roundEnded", mode: "fiveTrades", endNetWorth: 112.34, tradesMade: 5, tradesWon: 3, totalRounds: 1, netProfit: 12 } as const;
-  assert.deepEqual(progressFor({ ...run, percent: 12.34 }).scores.find((s) => s.board === "fiveTrades"), { board: "fiveTrades", score: 1234 });
-  assert.equal(progressFor({ ...run, percent: -20 }).scores.find((s) => s.board === "fiveTrades"), undefined);
+test("5 Trades submits the end-of-run stack in dollars, like the sprint", () => {
+  const run = { type: "roundEnded", mode: "fiveTrades", tradesMade: 5, tradesWon: 3, totalRounds: 1, netProfit: 12 } as const;
+  assert.deepEqual(progressFor({ ...run, endNetWorth: 112.84, percent: 12.84 }).scores.find((s) => s.board === "fiveTrades"), { board: "fiveTrades", score: 112 });
+  assert.deepEqual(progressFor({ ...run, endNetWorth: 80, percent: -20 }).scores.find((s) => s.board === "fiveTrades"), { board: "fiveTrades", score: 80 });
 });
 
 test("5 Trades achievements", () => {
@@ -41,16 +41,16 @@ test("allTimeNetProfit subtracts losing rounds from winning ones", () => {
   assert.equal(allTimeNetProfit({ totalProfit: 0, totalLoss: 250 }), -250);
 });
 
-test("pop quiz reports streaks and streak achievements on correct calls only", () => {
+test("pop quiz earns streak achievements on correct calls only, with no leaderboard", () => {
   assert.deepEqual(progressFor({ type: "quizAnswered", correct: false, streak: 0 }), { scores: [], achievements: [] });
   const tenth = progressFor({ type: "quizAnswered", correct: true, streak: 10 });
-  assert.deepEqual(tenth.scores, [{ board: "quizStreak", score: 10 }]);
+  assert.deepEqual(tenth.scores, []);
   assert.deepEqual(tenth.achievements, ["quizFirstCorrect", "quizStreak5", "quizStreak10"]);
 });
 
-test("training trades never touch money boards and report the session return", () => {
+test("training trades earn achievements but report no leaderboard scores", () => {
   const green = progressFor({ type: "tradeClosed", training: true, profit: 5, trainingReturnPercent: 55 });
-  assert.deepEqual(green.scores, [{ board: "trainingReturn", score: 5500 }]);
+  assert.deepEqual(green.scores, []);
   assert.deepEqual(green.achievements, ["trainingFirstGreen", "trainingPlus50"]);
   assert.deepEqual(progressFor({ type: "tradeClosed", training: true, profit: -5, trainingReturnPercent: -10 }), { scores: [], achievements: [] });
   assert.deepEqual(progressFor({ type: "tradeOpened", training: true, leverage: 50 }).achievements, []);
@@ -63,5 +63,4 @@ test("training return compounds on the virtual stack and floors at -100%", () =>
   assert.ok(Math.abs(afterTwo - 21) < 1e-9);
   assert.equal(compoundTrainingReturn(0, -150, 100), -100);
   assert.equal(compoundTrainingReturn(12, 5, 0), 12);
-  assert.equal(percentScore(12.345), 1235);
 });
