@@ -64,3 +64,22 @@ test("training return compounds on the virtual stack and floors at -100%", () =>
   assert.equal(compoundTrainingReturn(0, -150, 100), -100);
   assert.equal(compoundTrainingReturn(12, 5, 0), 12);
 });
+
+test("an abandoned round still reports all-time net profit, and nothing else", () => {
+  const progress = progressFor({ type: "roundAbandoned", totalRounds: 7, netProfit: -45 });
+  assert.deepEqual(progress.scores, [{ board: "netProfit", score: -45 }]);
+  assert.deepEqual(progress.achievements, []);
+});
+
+test("all-time net profit accumulates wins and losses round after round", () => {
+  // Rounds of +300, -120, -500 (liquidation), +80: the board should follow the running total.
+  let totals = { totalProfit: 0, totalLoss: 0 };
+  const running: number[] = [];
+  for (const roundProfit of [300, -120, -500, 80]) {
+    totals = roundProfit > 0
+      ? { ...totals, totalProfit: totals.totalProfit + roundProfit }
+      : { ...totals, totalLoss: totals.totalLoss + Math.abs(roundProfit) };
+    running.push(allTimeNetProfit(totals));
+  }
+  assert.deepEqual(running, [300, 180, -320, -240]);
+});

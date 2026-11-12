@@ -42,6 +42,8 @@ export type ProgressEvent =
       netProfit: number;
     }
   | { type: "liquidated"; totalRounds: number; netProfit: number }
+  /** A round left for the menu before it finished: its P&L still counts toward net profit. */
+  | { type: "roundAbandoned"; totalRounds: number; netProfit: number }
   | { type: "quizAnswered"; correct: boolean; streak: number };
 
 export type ScoreSubmission = { board: LeaderboardKey; score: number };
@@ -100,6 +102,10 @@ export const progressFor = (event: ProgressEvent): Progress => {
       const base = netProfitProgress(event.netProfit, event.totalRounds);
       return { scores: base.scores, achievements: ["liquidated", ...base.achievements] };
     }
+
+    case "roundAbandoned":
+      // No sprint/5 Trades score for an unfinished round, but its money is real.
+      return netProfitProgress(event.netProfit, event.totalRounds);
 
     case "quizAnswered": {
       if (!event.correct) {

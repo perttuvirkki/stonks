@@ -2959,8 +2959,28 @@ function AppContent() {
             const capturedStats = { ...roundStatsRef.current };
             const capturedRoundStartedAt = roundStartedAtRef.current;
             const margin = positionsRef.current.reduce((sum, position) => sum + position.amount, 0);
+            // The whole round's P&L, not just the lost margin: trades closed earlier in the round
+            // count too. Margin was already taken out of the stack when the position opened.
+            const roundStart = roundStartNetWorthRef.current || normalizeBalance(stackBalanceRef.current + margin);
+            const roundProfit = normalizeBalance(stackBalanceRef.current) - roundStart;
             if (showPatternLinesRef.current) {
               recordTrainingTrade(-margin);
+            } else {
+              // Recorded right away (not when the margin-call sheet appears) so leaving for the
+              // menu in the meantime can't drop the loss from the all-time total.
+              recordRoundEnd({
+                tradesMade: capturedStats.tradesMade,
+                tradesWon: capturedStats.tradesWon,
+                tradesLost: capturedStats.tradesLost,
+                profitAmount: roundProfit,
+                biggestWinPercent: capturedStats.biggestWinPercent,
+                biggestLossPercent: capturedStats.biggestLossPercent,
+                wasLiquidated: true,
+                closestToLiquidation: 0,
+                durationMs: capturedRoundStartedAt ? Math.max(0, Date.now() - capturedRoundStartedAt) : ROUND_DURATION_MS,
+                liquidationLeverage: liquidatedLeverage,
+              });
+              reportProgress({ type: "liquidated", ...lifetimeNetProgress() });
             }
 
             resetRoundState();
@@ -2977,23 +2997,6 @@ function AppContent() {
               setMarginCallVariant(pickMarginCallVariant());
               setIsMarginCallVisible(true);
               marginCallTimeoutRef.current = null;
-
-              // Record liquidation in lifetime stats (only for real rounds, not training wheels)
-              if (!showPatternLinesRef.current) {
-                recordRoundEnd({
-                  tradesMade: capturedStats.tradesMade,
-                  tradesWon: capturedStats.tradesWon,
-                  tradesLost: capturedStats.tradesLost,
-                  profitAmount: -margin,
-                  biggestWinPercent: capturedStats.biggestWinPercent,
-                  biggestLossPercent: capturedStats.biggestLossPercent,
-                  wasLiquidated: true,
-                  closestToLiquidation: 0,
-                  durationMs: capturedRoundStartedAt ? Math.max(0, Date.now() - capturedRoundStartedAt) : ROUND_DURATION_MS,
-                  liquidationLeverage: liquidatedLeverage,
-                });
-                reportProgress({ type: "liquidated", ...lifetimeNetProgress() });
-              }
             }, 900);
             shouldUpdateLines = true;
           }
@@ -3143,10 +3146,47 @@ function AppContent() {
     void GameCenter.showLeaderboard(leaderboardId);
   };
 
+  /**
+   * Leaving for the menu mid-round used to throw the round away, so a losing run could be quit
+   * and its loss never reached the all-time total. Settle it instead: close open positions at
+   * the current price and record the round's P&L (no results sheet, no sprint/5 Trades score).
+   */
+  const settleAbandonedRound = () => {
+    if (!roundEndsAtRef.current || showPatternLinesRef.current) {
+      return;
+    }
+    const price = getCurrentPrice() ?? BASE_PRICE;
+    const startNetWorth = roundStartNetWorthRef.current || normalizeBalance(computeNetWorth(price));
+    if (positionsRef.current.length) {
+      closeAllPositionsAtPrice(price, { showToast: false, evaluateRoundCompletion: false });
+    }
+    const profit = normalizeBalance(stackBalanceRef.current) - startNetWorth;
+    const stats = roundStatsRef.current;
+    const roundStartedAt = roundStartedAtRef.current;
+    roundEndsAtRef.current = null;
+    roundStartedAtRef.current = null;
+    if (stats.tradesMade === 0 && Math.abs(profit) < 0.005) {
+      return;
+    }
+    recordRoundEnd({
+      tradesMade: stats.tradesMade,
+      tradesWon: stats.tradesWon,
+      tradesLost: stats.tradesLost,
+      profitAmount: profit,
+      biggestWinPercent: stats.biggestWinPercent,
+      biggestLossPercent: stats.biggestLossPercent,
+      wasLiquidated: false,
+      closestToLiquidation: stats.closestToLiquidation,
+      durationMs: roundStartedAt ? Math.max(0, Date.now() - roundStartedAt) : 0,
+    });
+    reportProgress({ type: "roundAbandoned", ...lifetimeNetProgress() });
+  };
+
   const openMenuScreen = () => {
     if (isScreenTransitioningRef.current) {
       return;
     }
+    settleAbandonedRound();
     setShowStartHint(false);
     setShowSpeedHint(false);
     setIsPatternSettingsVisible(false);
