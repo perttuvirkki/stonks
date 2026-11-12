@@ -130,7 +130,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <Text style={styles.mcdonaldsTagline}>i'm lovin' it™</Text>
       </View>
       <View style={[styles.mcdonaldsFooter, { paddingBottom: bottomPad }]}>
-        <UiButton classic title="Submit Application" onPress={onTryAgain} variant="borderedProminent" color="#FFC72C" controlSize="large" darkMode />
+        <UiButton title="Submit Application" onPress={onTryAgain} variant="borderedProminent" controlSize="large" darkMode />
       </View>
     </>
   );
@@ -224,7 +224,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
           </View>
         </View>
         <View style={[styles.newspaperFooter, { paddingBottom: bottomPad }]}>
-          <UiButton classic title="Try again" onPress={onTryAgain} variant="borderedProminent" color="#2d2d2d" controlSize="large" />
+          <UiButton title="Try again" onPress={onTryAgain} variant="borderedProminent" controlSize="large" />
         </View>
       </>
     );
@@ -253,7 +253,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         </View>
       </View>
       <View style={[styles.instructionFooter, { paddingBottom: bottomPad }]}>
-        <UiButton classic title="I should've read this first" onPress={onTryAgain} variant="borderedProminent" color="#4a4a8a" controlSize="large" darkMode />
+        <UiButton title="I should've read this first" onPress={onTryAgain} variant="borderedProminent" controlSize="large" darkMode />
       </View>
     </>
   );
@@ -273,7 +273,7 @@ export const MarginCallOverlay = memo(({ visible, darkMode, variant = "classic",
         <Text style={styles.mirrorAttribution}>— Your reflection</Text>
       </View>
       <View style={[styles.mirrorFooter, { paddingBottom: bottomPad }]}>
-        <UiButton classic title="*wipes single tear*" onPress={onTryAgain} variant="borderedProminent" color="#5a5a8a" controlSize="large" darkMode />
+        <UiButton title="*wipes single tear*" onPress={onTryAgain} variant="borderedProminent" controlSize="large" darkMode />
       </View>
     </>
   );
