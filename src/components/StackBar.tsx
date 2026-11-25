@@ -89,9 +89,9 @@ export function StackBar({
           darkMode={darkMode}
         >
           <View style={styles.menuBurgerGlyph}>
-            <View style={[styles.menuBurgerLine, darkMode && styles.menuBurgerLineDark]} />
-            <View style={[styles.menuBurgerLine, darkMode && styles.menuBurgerLineDark]} />
-            <View style={[styles.menuBurgerLine, darkMode && styles.menuBurgerLineDark]} />
+            <View style={[styles.menuBurgerLine, darkMode && !trainingMode && styles.menuBurgerLineDark]} />
+            <View style={[styles.menuBurgerLine, darkMode && !trainingMode && styles.menuBurgerLineDark]} />
+            <View style={[styles.menuBurgerLine, darkMode && !trainingMode && styles.menuBurgerLineDark]} />
           </View>
         </UiButton>
         {trainingMode ? (
