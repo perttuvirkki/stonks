@@ -32,6 +32,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "./plugins/withSceneLifecycle",
     "./plugins/withPodsDeploymentTarget",
+    "./plugins/withAndroidReleaseSigning",
   ],
   orientation: "portrait",
   icon: APP_ICON,
@@ -39,6 +40,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.ludussuper.stonks",
+    // Ludus Super Oy, so regenerated native projects keep signing for App Store archives.
+    appleTeamId: "7TG5PPM6WL",
     icon: APP_ICON,
     infoPlist: {
       // Per-screen status bar styles (react-native-screens); the app-wide UIApplication setter is a no-op on iOS 27.
