@@ -84,3 +84,6 @@ yarn-error.*
 *.tsbuildinfo
 
 # @end expo-cli
+
+# Release archives
+/build/
