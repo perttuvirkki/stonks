@@ -153,7 +153,12 @@ type SettingsSection = {
   rows: SettingsRow[];
 };
 
-type ChartSpeedMs = 100 | 125 | 150 | 175 | 200;
+/** Milliseconds per candle. Lower is faster. */
+type ChartSpeedMs = number;
+const SPEED_MIN_MS = 25;
+const SPEED_MAX_MS = 250;
+const SPEED_STEP_MS = 25;
+const clampSpeedMs = (ms: number) => Math.min(SPEED_MAX_MS, Math.max(SPEED_MIN_MS, Math.round(ms / SPEED_STEP_MS) * SPEED_STEP_MS));
 
 // Estimate used for UI messaging (pattern length + typical resolve/spawn overhead).
 const ESTIMATED_CANDLES_PER_PATTERN_CYCLE = 80;
@@ -1491,7 +1496,7 @@ function AppContent() {
   const [isTopScoreVisible, setIsTopScoreVisible] = useState(false);
   const [isTotalStatsVisible, setIsTotalStatsVisible] = useState(false);
   const [marginCallVariant, setMarginCallVariant] = useState<MarginCallVariant>("classic");
-  const [baseTickMs, setBaseTickMs] = useState<ChartSpeedMs>(TICK_MS as ChartSpeedMs);
+  const [baseTickMs, setBaseTickMs] = useState<ChartSpeedMs>(TICK_MS);
   const baseTickMsRef = useRef<number>(TICK_MS);
   const [tickMs, setTickMs] = useState(TICK_MS);
   const marginCallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3730,19 +3735,29 @@ function AppContent() {
             }}
           />
           <View style={styles.floatingSpeed}>
+            {/* Candle speed in ms: minus lowers it (faster), plus raises it (slower). */}
             <View style={styles.floatingSpeedButtons}>
-              {[100, 125, 150, 175, 200].map((ms) => (
-                <UiButton
-                  key={ms}
-                  title={`${ms}ms`}
-                  onPress={() => setChartSpeedMs(ms as ChartSpeedMs)}
-                  variant={baseTickMs === ms ? "borderedProminent" : "bordered"}
-                  color={baseTickMs === ms ? terminal.amber : undefined}
-                  controlSize="small"
-                  style={[styles.floatingSpeedButton, ms === 200 && styles.floatingSpeedButtonWide]}
-                  darkMode={darkMode}
-                />
-              ))}
+              <UiButton
+                title="−"
+                onPress={() => setChartSpeedMs(clampSpeedMs(baseTickMs - SPEED_STEP_MS))}
+                disabled={baseTickMs <= SPEED_MIN_MS}
+                variant="bordered"
+                controlSize="small"
+                style={styles.floatingSpeedButton}
+                darkMode={darkMode}
+              />
+              <View style={[styles.floatingSpeedValue, { borderColor: terminal.amber, backgroundColor: darkMode ? terminal.bg : terminal.panel }]}>
+                <Text style={[styles.floatingSpeedValueText, { color: terminal.amber }]}>{baseTickMs}ms</Text>
+              </View>
+              <UiButton
+                title="+"
+                onPress={() => setChartSpeedMs(clampSpeedMs(baseTickMs + SPEED_STEP_MS))}
+                disabled={baseTickMs >= SPEED_MAX_MS}
+                variant="bordered"
+                controlSize="small"
+                style={styles.floatingSpeedButton}
+                darkMode={darkMode}
+              />
             </View>
           </View>
           {typeof roundSecondsRemaining === "number" && <RoundTimer seconds={roundSecondsRemaining} darkMode={darkMode} />}
@@ -4219,12 +4234,23 @@ const styles = StyleSheet.create({
   floatingSpeedButton: {
     height: 28,
     minHeight: 28,
-    width: 54,
+    width: 40,
     paddingHorizontal: 0,
     borderRadius: 2,
   },
-  floatingSpeedButtonWide: {
-    width: 58,
+  floatingSpeedValue: {
+    height: 28,
+    width: 80,
+    borderWidth: 1,
+    borderRadius: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  floatingSpeedValueText: {
+    fontFamily: TERMINAL_FONT,
+    fontSize: 13,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
   floatingTradeCounter: {
     position: "absolute",

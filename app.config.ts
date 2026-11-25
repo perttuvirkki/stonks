@@ -7,7 +7,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "stonks",
   slug: "stonks",
-  version: "1.15.0",
+  version: "2.0.0",
   scheme: "stonks",
   plugins: [
     "expo-router",
@@ -52,7 +52,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: "#ffffff",
     },
     package: "com.ludussuper.stonks",
-    versionCode: 5,
+    versionCode: 6,
   },
   web: {
     favicon: "./assets/favicon.png",
