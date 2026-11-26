@@ -2,7 +2,8 @@
 // so the signing block lives here instead of being hand-edited into app/build.gradle.
 // Credentials come from ~/.gradle/gradle.properties:
 //   STONKS_UPLOAD_STORE_FILE, STONKS_UPLOAD_STORE_PASSWORD, STONKS_UPLOAD_KEY_ALIAS, STONKS_UPLOAD_KEY_PASSWORD
-// STONKS_UPLOAD_STORE_FILE is resolved relative to android/app/.
+// STONKS_UPLOAD_STORE_FILE is resolved relative to android/app/; use an absolute path outside
+// android/ (e.g. ~/keys/stonks/my-upload-key.keystore), since prebuild regenerates that folder.
 const { withAppBuildGradle } = require("expo/config-plugins");
 
 const MARKER = "// @stonks/release-signing";
