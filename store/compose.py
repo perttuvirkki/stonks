@@ -4,6 +4,7 @@ Run with a Python that has Pillow:  python store/compose.py
 Outputs:
   store/appstore/iphone-6.9/NN-name.png   1320x2868 (App Store 6.9" iPhone)
   store/play/phone/NN-name.png            1080x2160 (Google Play phone, 2:1)
+  store/appstore/ipad-13/NN-name.png      2064x2752 (App Store 13" iPad, from store/raw-ipad)
 """
 
 from pathlib import Path
@@ -35,9 +36,11 @@ SHOTS = [
     ("menu", "FIVE WAYS TO TRADE", "Sprint, 5 Trades, Training Wheels, Pop Quiz, Daily Quote."),
 ]
 
+# folder -> (canvas size, raw capture folder, raw names that differ from SHOTS)
 TARGETS = {
-    ROOT / "appstore" / "iphone-6.9": (1320, 2868),
-    ROOT / "play" / "phone": (1080, 2160),
+    ROOT / "appstore" / "iphone-6.9": ((1320, 2868), RAW, {}),
+    ROOT / "play" / "phone": ((1080, 2160), RAW, {}),
+    ROOT / "appstore" / "ipad-13": ((2064, 2752), ROOT / "raw-ipad", {"training-c": "training"}),
 }
 
 
@@ -110,13 +113,13 @@ def compose(raw_path, headline, subline, size):
 
 
 def main():
-    for folder, size in TARGETS.items():
+    for folder, (size, raw_dir, renames) in TARGETS.items():
         folder.mkdir(parents=True, exist_ok=True)
         for old in folder.glob("*.png"):
             old.unlink()
         for index, (name, headline, subline) in enumerate(SHOTS, start=1):
             out = folder / f"{index:02d}-{name}.png"
-            compose(RAW / f"{name}.png", headline, subline, size).save(out, optimize=True)
+            compose(raw_dir / f"{renames.get(name, name)}.png", headline, subline, size).save(out, optimize=True)
             print(out.relative_to(ROOT.parent), size)
 
 

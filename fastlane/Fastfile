@@ -1,0 +1,417 @@
+require 'json'
+require 'net/http'
+require 'uri'
+
+# Store automation for stonks. App Store Connect auth comes from the same place smartcraft uses:
+# APP_STORE_CONNECT_KEY_PATH/_KEY_ID/_ISSUER_ID, or ~/.vibe-aso/config.json. Keys are only read here,
+# at run time, and never printed.
+
+def project_path(path)
+  File.expand_path(path, File.expand_path('..', __dir__))
+end
+
+def app_store_connect_auth
+  key_path = ENV['APP_STORE_CONNECT_KEY_PATH']
+  key_id = ENV['APP_STORE_CONNECT_KEY_ID']
+  issuer_id = ENV['APP_STORE_CONNECT_ISSUER_ID']
+  if key_path.to_s.empty?
+    config_path = File.expand_path('~/.vibe-aso/config.json')
+    UI.user_error!('No App Store Connect API key: set APP_STORE_CONNECT_KEY_PATH or ~/.vibe-aso/config.json') unless File.file?(config_path)
+    asc = JSON.parse(File.read(config_path)).fetch('asc', {})
+    key_path = File.expand_path(asc.fetch('p8_path', '~/.vibe-aso/AuthKey.p8'))
+    key_id = asc['key_id']
+    issuer_id = asc['issuer_id']
+  end
+  UI.user_error!('App Store Connect key id / issuer id missing') if key_id.to_s.empty? || issuer_id.to_s.empty?
+  app_store_connect_api_key(key_id: key_id, issuer_id: issuer_id, key_filepath: key_path)
+end
+
+APP_IDENTIFIER = 'com.ludussuper.stonks'.freeze
+VERSION = '2.0.0'.freeze
+
+# Minimal App Store Connect REST client for endpoints Spaceship has no models for (Game Center).
+def asc_request(method, path, body = nil)
+  uri = URI("https://api.appstoreconnect.apple.com/v1/#{path}")
+  request = { get: Net::HTTP::Get, post: Net::HTTP::Post, patch: Net::HTTP::Patch }.fetch(method).new(uri)
+  request['Authorization'] = "Bearer #{Spaceship::ConnectAPI.token.text}"
+  request['Content-Type'] = 'application/json'
+  request.body = body.to_json if body
+  response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(request) }
+  parsed = response.body.to_s.empty? ? {} : JSON.parse(response.body)
+  unless response.is_a?(Net::HTTPSuccess)
+    UI.user_error!("#{method.upcase} #{path} failed (#{response.code}): #{parsed.fetch('errors', parsed).to_json[0, 600]}")
+  end
+  parsed
+end
+
+platform :ios do
+  desc 'Read-only: show the app, its versions, screenshot sets and Game Center setup'
+  lane :status do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    UI.user_error!("App #{APP_IDENTIFIER} not found") unless app
+    UI.message("App: #{app.name} (#{app.id})")
+
+    app.get_app_store_versions(filter: { platform: 'IOS' }, limit: 5).each do |version|
+      UI.message("Version #{version.version_string}: #{version.app_store_state}")
+    end
+
+    version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS) ||
+              app.get_live_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    if version
+      version.get_app_store_version_localizations.each do |localization|
+        sets = localization.get_app_screenshot_sets
+        summary = sets.map { |set| "#{set.screenshot_display_type}=#{set.app_screenshots.to_a.size}" }.join(', ')
+        UI.message("  #{version.version_string} #{localization.locale}: #{summary}")
+      end
+    end
+
+    builds = Spaceship::ConnectAPI::Build.all(app_id: app.id, version: VERSION, sort: '-uploadedDate', limit: 3)
+    builds.each { |build| UI.message("Build #{VERSION} (#{build.version}): #{build.processing_state}") }
+
+    detail = asc_request(:get, "apps/#{app.id}/gameCenterDetail")['data']
+    if detail
+      leaderboards = asc_request(:get, "gameCenterDetails/#{detail['id']}/gameCenterLeaderboards?limit=50")['data']
+      achievements = asc_request(:get, "gameCenterDetails/#{detail['id']}/gameCenterAchievements?limit=50")['data']
+      UI.message("Game Center leaderboards: #{leaderboards.map { |l| l.dig('attributes', 'vendorIdentifier') }.join(', ')}")
+      UI.message("Game Center achievements: #{achievements.map { |a| a.dig('attributes', 'vendorIdentifier') }.join(', ')}")
+    else
+      UI.message('Game Center: not enabled for this app')
+    end
+  end
+end
+
+platform :ios do
+  desc 'Read-only: dump existing Game Center leaderboard settings'
+  lane :gc_inspect do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    detail = asc_request(:get, "apps/#{app.id}/gameCenterDetail")['data']
+    UI.message("detail #{detail['id']} #{detail['attributes'].to_json}")
+    asc_request(:get, "gameCenterDetails/#{detail['id']}/gameCenterLeaderboards?limit=50")['data'].each do |board|
+      UI.message("board #{board['id']} #{board['attributes'].to_json}")
+      asc_request(:get, "gameCenterLeaderboards/#{board['id']}/localizations")['data'].each do |loc|
+        UI.message("  loc #{loc['attributes'].to_json}")
+      end
+    end
+  end
+end
+
+# Game Center items for 2.0.0. iOS vendor IDs must match src/services/GameCenterService.ts.
+GC_LEADERBOARDS = [
+  { vendor: 'fivetrades1', name: '5 Trades top stacks', description: 'Best stack after five trades',
+    formatter: 'INTEGER', submission: 'BEST_SCORE', suffix: 'bucks', suffix_singular: 'buck' },
+].freeze
+
+# [vendor suffix, badge key, name, before-earned text, after-earned text, points]
+GC_ACHIEVEMENTS = [
+  ['firsttrade', 'firstTrade', 'First Trade', 'Close your first trade.', 'You closed your first trade.', 10],
+  ['leverage10x', 'leverage10x', '10x Degen', 'Open a trade at 10x leverage or more.', 'You went 10x. No regrets.', 20],
+  ['survive100', 'rounds100', 'Centurion', 'Play 100 rounds.', 'You played 100 rounds.', 100],
+  ['liquidated', 'liquidated', 'Margin Called', 'Get liquidated.', 'The market took it all. Character building.', 10],
+  ['sprintdouble', 'sprintDouble', 'Double Up', 'Finish a 60s Sprint at +100% or better.', 'You doubled your stack in 60 seconds.', 50],
+  ['fivetradesdone', 'fiveTradesDone', 'Five and Done', 'Complete a 5 Trades run.', 'You completed a 5 Trades run.', 20],
+  ['fivetradesperfect', 'fiveTradesPerfect', 'Perfect Five', 'Win all five trades in a 5 Trades run.', 'Five trades, five winners.', 75],
+  ['fivetradesdouble', 'fiveTradesDouble', 'Five to Double', 'Finish a 5 Trades run at +100% or better.', 'You doubled your stack in five trades.', 75],
+  ['quizfirst', 'quizFirstCorrect', 'Called It', 'Call a Pop Quiz pattern correctly.', 'Your first correct call.', 10],
+  ['quizstreak5', 'quizStreak5', 'Hot Streak', 'Get 5 Pop Quiz calls right in a row.', 'Five correct calls in a row.', 40],
+  ['quizstreak10', 'quizStreak10', 'Chart Whisperer', 'Get 10 Pop Quiz calls right in a row.', 'Ten in a row. The charts talk to you.', 80],
+  ['trainingfirstgreen', 'trainingFirstGreen', 'Green Wheels', 'Close a profitable trade in Training Wheels.', 'Your first green training trade.', 10],
+  ['trainingplus50', 'trainingPlus50', 'Paper Hands Up', 'Reach +50% in a Training Wheels session.', 'Up 50% with training wheels on.', 50],
+  ['netprofit1k', 'netProfit1k', 'Four Figures', 'Reach $1,000 all-time net profit.', 'Four figures of all-time profit.', 50],
+  ['netprofit10k', 'netProfit10k', 'Five Figures', 'Reach $10,000 all-time net profit.', 'Five figures of all-time profit.', 100],
+].freeze
+GC_LOCALE = 'en-GB'.freeze
+
+def upload_achievement_image(localization_id, path)
+  bytes = File.binread(path)
+  image = asc_request(:post, 'gameCenterAchievementImages', {
+    data: { type: 'gameCenterAchievementImages',
+            attributes: { fileName: File.basename(path), fileSize: bytes.bytesize },
+            relationships: { gameCenterAchievementLocalization: { data: { type: 'gameCenterAchievementLocalizations', id: localization_id } } } }
+  })['data']
+  image.dig('attributes', 'uploadOperations').each do |op|
+    uri = URI(op['url'])
+    request = Net::HTTP.const_get(op['method'].capitalize).new(uri)
+    op['requestHeaders'].each { |header| request[header['name']] = header['value'] }
+    request.body = bytes.byteslice(op['offset'], op['length'])
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(request) }
+    UI.user_error!("Image upload failed (#{response.code})") unless response.is_a?(Net::HTTPSuccess)
+  end
+  asc_request(:patch, "gameCenterAchievementImages/#{image['id']}",
+              { data: { type: 'gameCenterAchievementImages', id: image['id'], attributes: { uploaded: true } } })
+end
+
+platform :ios do
+  desc 'Create the 2.0.0 Game Center leaderboard and achievements (skips ones that exist)'
+  lane :gc_setup do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    detail_id = asc_request(:get, "apps/#{app.id}/gameCenterDetail")['data']['id']
+    detail_rel = { gameCenterDetail: { data: { type: 'gameCenterDetails', id: detail_id } } }
+
+    existing_boards = asc_request(:get, "gameCenterDetails/#{detail_id}/gameCenterLeaderboards?limit=50")['data']
+                      .map { |b| b.dig('attributes', 'vendorIdentifier') }
+    GC_LEADERBOARDS.each do |board|
+      if existing_boards.include?(board[:vendor])
+        UI.message("Leaderboard #{board[:vendor]} exists, skipping")
+        next
+      end
+      created = asc_request(:post, 'gameCenterLeaderboards', {
+        data: { type: 'gameCenterLeaderboards',
+                attributes: { referenceName: board[:vendor], vendorIdentifier: board[:vendor], defaultFormatter: board[:formatter],
+                              submissionType: board[:submission], scoreSortType: 'DESC' },
+                relationships: detail_rel }
+      })['data']
+      asc_request(:post, 'gameCenterLeaderboardLocalizations', {
+        data: { type: 'gameCenterLeaderboardLocalizations',
+                attributes: { locale: GC_LOCALE, name: board[:name], description: board[:description],
+                              formatterSuffix: board[:suffix], formatterSuffixSingular: board[:suffix_singular] },
+                relationships: { gameCenterLeaderboard: { data: { type: 'gameCenterLeaderboards', id: created['id'] } } } }
+      })
+      UI.success("Created leaderboard #{board[:vendor]}")
+    end
+
+    existing = asc_request(:get, "gameCenterDetails/#{detail_id}/gameCenterAchievements?limit=50")['data']
+               .map { |a| a.dig('attributes', 'vendorIdentifier') }
+    GC_ACHIEVEMENTS.each do |suffix, badge, name, before, after, points|
+      vendor = "com.ludussuper.stonks.#{suffix}"
+      if existing.include?(vendor)
+        UI.message("Achievement #{vendor} exists, skipping")
+        next
+      end
+      achievement = asc_request(:post, 'gameCenterAchievements', {
+        data: { type: 'gameCenterAchievements',
+                attributes: { referenceName: name, vendorIdentifier: vendor, points: points,
+                              showBeforeEarned: true, repeatable: false },
+                relationships: detail_rel }
+      })['data']
+      localization = asc_request(:post, 'gameCenterAchievementLocalizations', {
+        data: { type: 'gameCenterAchievementLocalizations',
+                attributes: { locale: GC_LOCALE, name: name, beforeEarnedDescription: before, afterEarnedDescription: after },
+                relationships: { gameCenterAchievement: { data: { type: 'gameCenterAchievements', id: achievement['id'] } } } }
+      })['data']
+      upload_achievement_image(localization['id'], project_path("store/achievements/#{badge}.png"))
+      UI.success("Created achievement #{vendor} (#{points} pts)")
+    end
+  end
+end
+
+platform :ios do
+  desc 'Read-only: show how a Game Center achievement links to versions/releases'
+  lane :gc_links do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    detail_id = asc_request(:get, "apps/#{app.id}/gameCenterDetail")['data']['id']
+    ach = asc_request(:get, "gameCenterDetails/#{detail_id}/gameCenterAchievements?limit=1")['data'].first
+    UI.message("achievement relationships: #{ach['relationships'].keys.join(', ')}")
+    board = asc_request(:get, "gameCenterDetails/#{detail_id}/gameCenterLeaderboards?limit=50")['data'].first
+    UI.message("leaderboard relationships: #{board['relationships'].keys.join(', ')}")
+    detail = asc_request(:get, "gameCenterDetails/#{detail_id}")['data']
+    UI.message("detail relationships: #{detail['relationships'].keys.join(', ')}")
+    %w[versions releases].each do |rel|
+      next unless ach['relationships'].key?(rel)
+      begin
+        data = asc_request(:get, "gameCenterAchievements/#{ach['id']}/#{rel}")['data']
+        UI.message("achievement #{rel}: #{data.to_json[0, 400]}")
+      rescue StandardError => e
+        UI.message("achievement #{rel}: #{e.message[0, 300]}")
+      end
+    end
+  end
+end
+
+platform :ios do
+  desc 'Prepare 2.0.0 in App Store Connect: version, release notes, iPhone screenshots, build. Does not submit.'
+  lane :prepare_release do
+    api_key = app_store_connect_auth
+    deliver(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      app_version: VERSION,
+      metadata_path: project_path('fastlane/metadata'),
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      skip_metadata: false,
+      skip_app_version_update: false,
+      ignore_language_directory_validation: true,
+      submit_for_review: false,
+      run_precheck_before_submit: false,
+      force: true
+    )
+
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    UI.user_error!("No editable #{VERSION} version") unless version && version.version_string == VERSION
+
+    # Replace only the 6.7"/6.9" iPhone set; other display types are left as they are.
+    shots = Dir[project_path('store/appstore/iphone-6.9/*.png')].sort
+    version.get_app_store_version_localizations.each do |localization|
+      set = localization.get_app_screenshot_sets.find { |s| s.screenshot_display_type == 'APP_IPHONE_67' } ||
+            localization.create_app_screenshot_set(attributes: { screenshotDisplayType: 'APP_IPHONE_67' })
+      set.app_screenshots.to_a.each(&:delete!)
+      shots.each do |path|
+        set.upload_screenshot(path: path, wait_for_processing: true)
+        UI.message("#{localization.locale}: uploaded #{File.basename(path)}")
+      end
+    end
+
+    build = Spaceship::ConnectAPI::Build.all(app_id: app.id, version: VERSION, sort: '-uploadedDate', limit: 1).first
+    UI.user_error!("No processed #{VERSION} build") unless build && build.processing_state == 'VALID'
+    if build.uses_non_exempt_encryption.nil?
+      Spaceship::ConnectAPI.patch_builds(build_id: build.id, attributes: { usesNonExemptEncryption: false })
+    end
+    version.select_build(build_id: build.id)
+    UI.success("#{VERSION} ready: build #{build.version}, #{shots.size} iPhone screenshots, release notes set")
+  end
+end
+
+platform :ios do
+  desc 'Enable Game Center on the 2.0.0 version and queue the new leaderboard and achievements for release'
+  lane :gc_release do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    detail_id = asc_request(:get, "apps/#{app.id}/gameCenterDetail")['data']['id']
+    detail_rel = { gameCenterDetail: { data: { type: 'gameCenterDetails', id: detail_id } } }
+
+    app_versions = asc_request(:get, "gameCenterDetails/#{detail_id}/gameCenterAppVersions?include=appStoreVersion&limit=50")
+    linked = (app_versions['data'] || []).any? { |v| v.dig('relationships', 'appStoreVersion', 'data', 'id') == version.id }
+    if linked
+      UI.message("Game Center already enabled on #{VERSION}")
+    else
+      asc_request(:post, 'gameCenterAppVersions', {
+        data: { type: 'gameCenterAppVersions',
+                relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: version.id } } } }
+      })
+      UI.success("Enabled Game Center on #{VERSION}")
+    end
+
+    released_achievements = asc_request(:get, "gameCenterDetails/#{detail_id}/achievementReleases?limit=200&include=gameCenterAchievement")['data']
+                            .map { |r| r.dig('relationships', 'gameCenterAchievement', 'data', 'id') }
+    asc_request(:get, "gameCenterDetails/#{detail_id}/gameCenterAchievements?limit=50")['data'].each do |ach|
+      next if released_achievements.include?(ach['id'])
+      asc_request(:post, 'gameCenterAchievementReleases', {
+        data: { type: 'gameCenterAchievementReleases',
+                relationships: detail_rel.merge(gameCenterAchievement: { data: { type: 'gameCenterAchievements', id: ach['id'] } }) }
+      })
+      UI.success("Queued achievement #{ach.dig('attributes', 'vendorIdentifier')}")
+    end
+
+    released_boards = asc_request(:get, "gameCenterDetails/#{detail_id}/leaderboardReleases?limit=200&include=gameCenterLeaderboard")['data']
+                      .map { |r| r.dig('relationships', 'gameCenterLeaderboard', 'data', 'id') }
+    asc_request(:get, "gameCenterDetails/#{detail_id}/gameCenterLeaderboards?limit=50")['data'].each do |board|
+      next if released_boards.include?(board['id'])
+      # Boards that are already live (topscores1, netprofit1) can't be re-queued; only queue the new ones.
+      next unless GC_LEADERBOARDS.any? { |b| b[:vendor] == board.dig('attributes', 'vendorIdentifier') }
+      asc_request(:post, 'gameCenterLeaderboardReleases', {
+        data: { type: 'gameCenterLeaderboardReleases',
+                relationships: detail_rel.merge(gameCenterLeaderboard: { data: { type: 'gameCenterLeaderboards', id: board['id'] } }) }
+      })
+      UI.success("Queued leaderboard #{board.dig('attributes', 'vendorIdentifier')}")
+    end
+  end
+end
+
+platform :ios do
+  desc 'Submit the prepared 2.0.0 version (with its Game Center items) for App Store review'
+  lane :submit_review do
+    deliver(
+      api_key: app_store_connect_auth,
+      app_identifier: APP_IDENTIFIER,
+      app_version: VERSION,
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      skip_metadata: true,
+      skip_app_version_update: true,
+      submit_for_review: true,
+      run_precheck_before_submit: false,
+      submission_information: {
+        add_id_info_uses_idfa: false,
+        export_compliance_uses_encryption: false,
+        content_rights_contains_third_party_content: false
+      },
+      force: true
+    )
+  end
+end
+
+platform :ios do
+  desc 'Read-only diagnosis: why 2.0.0 cannot be added to a review submission'
+  lane :review_errors do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    submission = app.get_in_progress_review_submission(platform: Spaceship::ConnectAPI::Platform::IOS) ||
+                 app.get_ready_review_submission(platform: Spaceship::ConnectAPI::Platform::IOS)
+    UI.message("review submission: #{submission ? "#{submission.id} #{submission.state}" : 'none'}")
+    next unless submission
+    uri = URI('https://api.appstoreconnect.apple.com/v1/reviewSubmissionItems')
+    request = Net::HTTP::Post.new(uri)
+    request['Authorization'] = "Bearer #{Spaceship::ConnectAPI.token.text}"
+    request['Content-Type'] = 'application/json'
+    request.body = { data: { type: 'reviewSubmissionItems', relationships: {
+      reviewSubmission: { data: { type: 'reviewSubmissions', id: submission.id } },
+      appStoreVersion: { data: { type: 'appStoreVersions', id: version.id } } } } }.to_json
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(request) }
+    body = JSON.parse(response.body)
+    (body['errors'] || []).each do |error|
+      UI.message("#{error['code']}: #{error['detail']}")
+      (error.dig('meta', 'associatedErrors') || {}).each do |resource, list|
+        list.each { |e| UI.message("  #{resource}: #{e['code']} #{e['detail']}") }
+      end
+    end
+    UI.message("added OK (#{response.code})") if response.is_a?(Net::HTTPSuccess)
+  end
+end
+
+platform :ios do
+  desc 'Answer the new age-rating question(s) that 2.0.0 is missing'
+  lane :age_rating do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    info = app.fetch_edit_app_info || app.fetch_live_app_info
+    declaration = asc_request(:get, "appInfos/#{info.id}/ageRatingDeclaration")['data']
+    id = declaration['id']
+    UI.message("Age rating declaration #{id}; unanswered: #{declaration['attributes'].select { |_, v| v.nil? }.keys.join(', ')}")
+    # The declaration can only be updated, not read, through the API.
+    asc_request(:patch, "ageRatingDeclarations/#{id}",
+                { data: { type: 'ageRatingDeclarations', id: id, attributes: { socialMedia: false } } })
+    UI.success('Age rating: socialMedia answered (no)')
+  end
+end
+
+platform :ios do
+  desc 'Upload the 13" iPad screenshots to the 2.0.0 version (replaces only that set)'
+  lane :upload_ipad do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    shots = Dir[project_path('store/appstore/ipad-13/*.png')].sort
+    version.get_app_store_version_localizations.each do |localization|
+      set = localization.get_app_screenshot_sets.find { |s| s.screenshot_display_type == 'APP_IPAD_PRO_3GEN_129' } ||
+            localization.create_app_screenshot_set(attributes: { screenshotDisplayType: 'APP_IPAD_PRO_3GEN_129' })
+      set.app_screenshots.to_a.each(&:delete!)
+      shots.each do |path|
+        set.upload_screenshot(path: path, wait_for_processing: true)
+        UI.message("#{localization.locale}: uploaded iPad #{File.basename(path)}")
+      end
+    end
+  end
+end
+
+platform :ios do
+  desc 'Submit the pending review submission (2.0.0 already added) to App Review'
+  lane :submit_pending do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    submission = app.get_ready_review_submission(platform: Spaceship::ConnectAPI::Platform::IOS)
+    UI.user_error!('No ready review submission') unless submission
+    items = asc_request(:get, "reviewSubmissions/#{submission.id}/items")['data']
+    UI.message("Submission #{submission.id} has #{items.size} item(s)")
+    submission.submit_for_review
+    version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS) ||
+              app.get_app_store_versions(filter: { versionString: VERSION, platform: 'IOS' }).first
+    UI.success("Submitted. #{VERSION} state: #{version&.app_store_state}")
+  end
+end
