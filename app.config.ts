@@ -42,6 +42,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: "com.ludussuper.stonks",
     // Ludus Super Oy, so regenerated native projects keep signing for App Store archives.
     appleTeamId: "7TG5PPM6WL",
+    // Bump for every App Store upload of the same version.
+    buildNumber: "2",
     icon: APP_ICON,
     infoPlist: {
       // Per-screen status bar styles (react-native-screens); the app-wide UIApplication setter is a no-op on iOS 27.
