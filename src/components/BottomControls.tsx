@@ -62,7 +62,7 @@ export function BottomControls({
   const showCloseOnly = overtime && hasPositions;
 
   return (
-    <SafeAreaView edges={["bottom", "left", "right"]} style={styles.bottomSafeArea}>
+    <SafeAreaView edges={["bottom"]} style={styles.bottomSafeArea}>
       <View style={[styles.wagerBar, darkMode && styles.wagerBarDark]}>
         <View
           style={[

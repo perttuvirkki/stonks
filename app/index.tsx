@@ -124,6 +124,7 @@ const CHART_BOTTOM_INSET = 110;
 const TOP_SHEET_OFFSET = -240;
 const TRADE_SHEET_DETENTS = [0.18];
 const TRADE_BAR_GAP = 12;
+const TRADE_CONTROLS_MAX_WIDTH = 560;
 const LAUNCH_MENU_HEADER_HEIGHT = 44;
 const QUOTE_ROLL_WIDTH = 16;
 // The reveal starts this far left of the paper so its drop shadow is hidden too.
@@ -778,6 +779,15 @@ const INJECTED_CHART_SCRIPT = `
       var width = container.clientWidth || window.innerWidth;
       var height = container.clientHeight || window.innerHeight;
       state.chart.applyOptions({ width: width, height: height });
+      // Wide screens (iPad, an unfolded iPhone Duo) get proportionally wider candles so the
+      // same history fills the chart instead of bunching up on the right.
+      if (state.zoomBaseBarSpacing && state.zoomFactor) {
+        state.chart.timeScale().applyOptions({ barSpacing: Math.max(0.5, (state.zoomBaseBarSpacing * widthBarScale()) / state.zoomFactor) });
+      }
+    }
+    function widthBarScale() {
+      var width = container.clientWidth || window.innerWidth;
+      return Math.max(1, width / 390);
     }
     function setData(data) {
       if (!state.series) {
@@ -1221,7 +1231,9 @@ const INJECTED_CHART_SCRIPT = `
       if (typeof baseBarSpacing === "number" && isFinite(baseBarSpacing) && baseBarSpacing > 0) {
         // Only adjust bar spacing; do not also widen the visible time range, as that compounds the zoom-out
         // effect and makes the time scale overly dense.
-        var nextBarSpacing = baseBarSpacing / zoomFactor;
+        state.zoomBaseBarSpacing = baseBarSpacing;
+        state.zoomFactor = zoomFactor;
+        var nextBarSpacing = (baseBarSpacing * widthBarScale()) / zoomFactor;
         nextBarSpacing = Math.max(0.5, nextBarSpacing);
         timeScale.applyOptions({ barSpacing: nextBarSpacing });
       }
@@ -5115,8 +5127,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: Platform.OS === "android" ? 6 : 0,
     gap: TRADE_BAR_GAP,
+    // On wide screens (iPad, unfolded iPhone Duo) keep the controls thumb-sized and centered.
+    alignItems: "center",
   },
   wagerBar: {
+    width: "100%",
+    maxWidth: TRADE_CONTROLS_MAX_WIDTH,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -5150,6 +5166,8 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   tradeBar: {
+    width: "100%",
+    maxWidth: TRADE_CONTROLS_MAX_WIDTH,
     flexDirection: "row",
     alignItems: "stretch",
     gap: 8,
