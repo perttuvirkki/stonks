@@ -415,3 +415,57 @@ platform :ios do
     UI.success("Submitted. #{VERSION} state: #{version&.app_store_state}")
   end
 end
+
+def replace_screenshot_set(version, display_type, folder)
+  shots = Dir[project_path("#{folder}/*.png")].sort
+  UI.user_error!("No screenshots in #{folder}") if shots.empty?
+  version.get_app_store_version_localizations.each do |localization|
+    set = localization.get_app_screenshot_sets.find { |s| s.screenshot_display_type == display_type } ||
+          localization.create_app_screenshot_set(attributes: { screenshotDisplayType: display_type })
+    set.app_screenshots.to_a.each(&:delete!)
+    shots.each { |path| set.upload_screenshot(path: path, wait_for_processing: true) }
+    UI.message("#{localization.locale}: #{display_type} replaced with #{shots.size} screenshots")
+  end
+end
+
+platform :ios do
+  desc 'Pull 2.0.0 from review, swap in the current iPhone + iPad screenshots, and resubmit'
+  lane :resubmit_with_screenshots do
+    app_store_connect_auth
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    platform = Spaceship::ConnectAPI::Platform::IOS
+
+    submission = app.get_in_progress_review_submission(platform: platform)
+    if submission
+      asc_request(:patch, "reviewSubmissions/#{submission.id}",
+                  { data: { type: 'reviewSubmissions', id: submission.id, attributes: { canceled: true } } })
+      UI.message("Cancelled review submission #{submission.id}; waiting for 2.0.0 to become editable")
+    end
+
+    version = nil
+    30.times do
+      version = app.get_edit_app_store_version(platform: platform)
+      break if version && %w[DEVELOPER_REJECTED PREPARE_FOR_SUBMISSION REJECTED METADATA_REJECTED].include?(version.app_store_state)
+      sleep 10
+    end
+    UI.user_error!("2.0.0 did not become editable (state: #{version&.app_store_state})") unless version
+    UI.message("2.0.0 state: #{version.app_store_state}")
+
+    replace_screenshot_set(version, 'APP_IPHONE_67', 'store/appstore/iphone-6.9')
+    replace_screenshot_set(version, 'APP_IPAD_PRO_3GEN_129', 'store/appstore/ipad-13')
+
+    # A cancelled submission can't be reused; wait for it to settle, then submit a fresh one.
+    ready = nil
+    18.times do
+      ready = app.get_ready_review_submission(platform: platform)
+      break unless app.get_in_progress_review_submission(platform: platform)
+      sleep 10
+    end
+    ready ||= app.create_review_submission(platform: platform)
+    existing = asc_request(:get, "reviewSubmissions/#{ready.id}/items")['data']
+    ready.add_app_store_version_to_review_items(app_store_version_id: version.id) if existing.empty?
+    ready.submit_for_review
+    state = app.get_app_store_versions(filter: { versionString: VERSION, platform: 'IOS' }).first&.app_store_state
+    UI.success("Resubmitted #{VERSION}: #{state}")
+  end
+end

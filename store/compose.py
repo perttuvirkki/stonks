@@ -27,13 +27,15 @@ DIM = (154, 154, 154)
 BORDER = (77, 77, 77)
 
 # Order is the store order: the first one is what people see in search results.
+# Two short lines per shot (max 8 characters each) so the headline stays huge and
+# readable at store thumbnail size.
 SHOTS = [
-    ("sprint-toast", "LEVERAGE UP TO 50X", "Catch the breakout. Print the gains."),
-    ("sprint-open", "60 SECONDS. ONE STACK.", "Long or short, one tick from liquidation."),
-    ("training-c", "LEARN THE PATTERNS", "Training Wheels draws every line. Scored in %, no money at risk."),
-    ("quiz-reveal", "POP QUIZ", "The chart freezes. You call long or short."),
-    ("results", "FLEX YOUR RUN", "Leaderboards and achievements for every mode."),
-    ("menu", "FIVE WAYS TO TRADE", "Sprint, 5 Trades, Training Wheels, Pop Quiz, Daily Quote."),
+    ("sprint-toast", ("50X", "LEVERAGE")),
+    ("sprint-open", ("60 SEC", "SPRINTS")),
+    ("training-c", ("LEARN", "PATTERNS")),
+    ("quiz-reveal", ("POP", "QUIZ")),
+    ("results", ("FLEX", "YOUR WIN")),
+    ("menu", ("5 GAME", "MODES")),
 ]
 
 # folder -> (canvas size, raw capture folder, raw names that differ from SHOTS)
@@ -66,41 +68,41 @@ def rounded(image, radius):
     return out
 
 
-def compose(raw_path, headline, subline, size):
+def headline_size(draw, width, margin, unit):
+    """One type size for the whole set: the largest that fits every line across the canvas."""
+    longest = max((line for _, lines in SHOTS for line in lines), key=len)
+    size = round(300 * unit)
+    while size > 20 and draw.textlength(longest, font=ImageFont.truetype(HEAVY, size)) > width - 2 * margin:
+        size -= 4
+    return size
+
+
+def compose(raw_path, lines, size):
     width, height = size
     unit = width / 1320  # scale everything off the 6.9" layout
     canvas = Image.new("RGB", size, BG)
     draw = ImageDraw.Draw(canvas)
-    margin = round(72 * unit)
+    margin = round(64 * unit)
 
-    # Amber terminal header strip, like the app's own.
-    strip = round(96 * unit)
-    draw.rectangle((0, 0, width, strip), fill=AMBER)
-    tag_font = ImageFont.truetype(HEAVY, round(40 * unit))
-    draw.text((margin, strip / 2), "STONKS", font=tag_font, fill=BG, anchor="lm")
-    draw.text((width - margin, strip / 2), "<GO>", font=tag_font, fill=BG, anchor="rm")
+    # Thin amber terminal band.
+    draw.rectangle((0, 0, width, round(28 * unit)), fill=AMBER)
 
-    # Headline and subline.
-    y = strip + round(84 * unit)
-    head_font = ImageFont.truetype(HEAVY, round(104 * unit))
-    for line in wrap(draw, headline, head_font, width - 2 * margin):
-        draw.text((width / 2, y), line, font=head_font, fill=AMBER, anchor="mt")
-        y += round(120 * unit)
-    sub_font = ImageFont.truetype(MEDIUM, round(46 * unit))
-    y += round(14 * unit)
-    for line in wrap(draw, subline, sub_font, width - 2 * margin):
-        draw.text((width / 2, y), line, font=sub_font, fill=DIM, anchor="mt")
-        y += round(60 * unit)
+    # Huge two-line headline: first line amber, second white.
+    font = ImageFont.truetype(HEAVY, headline_size(draw, width, margin, unit))
+    ascent, descent = font.getmetrics()
+    line_height = ascent + descent
+    y = round(96 * unit)
+    for index, line in enumerate(lines):
+        draw.text((width / 2, y), line, font=font, fill=AMBER if index == 0 else TEXT, anchor="mt")
+        y += round(line_height * 0.92)
 
     # The screenshot, framed like a terminal panel, filling the rest.
-    top = y + round(56 * unit)
-    bottom_pad = round(64 * unit)
+    top = y + round(48 * unit)
+    bottom_pad = round(56 * unit)
     shot = Image.open(raw_path).convert("RGB")
-    avail_h = height - top - bottom_pad
-    avail_w = width - 2 * margin
-    scale = min(avail_h / shot.height, avail_w / shot.width)
+    scale = min((height - top - bottom_pad) / shot.height, (width - 2 * margin) / shot.width)
     shot = shot.resize((round(shot.width * scale), round(shot.height * scale)), Image.LANCZOS)
-    radius = round(56 * unit)
+    radius = round(48 * unit)
     x = (width - shot.width) // 2
     border = max(2, round(4 * unit))
     draw.rounded_rectangle(
@@ -108,7 +110,8 @@ def compose(raw_path, headline, subline, size):
         radius=radius + border,
         fill=BORDER,
     )
-    canvas.paste(rounded(shot, radius), (x, top), rounded(shot, radius))
+    masked = rounded(shot, radius)
+    canvas.paste(masked, (x, top), masked)
     return canvas
 
 
@@ -117,9 +120,9 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
         for old in folder.glob("*.png"):
             old.unlink()
-        for index, (name, headline, subline) in enumerate(SHOTS, start=1):
+        for index, (name, lines) in enumerate(SHOTS, start=1):
             out = folder / f"{index:02d}-{name}.png"
-            compose(raw_dir / f"{renames.get(name, name)}.png", headline, subline, size).save(out, optimize=True)
+            compose(raw_dir / f"{renames.get(name, name)}.png", lines, size).save(out, optimize=True)
             print(out.relative_to(ROOT.parent), size)
 
 
