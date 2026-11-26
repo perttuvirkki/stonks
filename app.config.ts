@@ -7,7 +7,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "stonks",
   slug: "stonks",
-  version: "2.0.0",
+  version: "2.0.1",
   scheme: "stonks",
   plugins: [
     "expo-router",
@@ -43,7 +43,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Ludus Super Oy, so regenerated native projects keep signing for App Store archives.
     appleTeamId: "7TG5PPM6WL",
     // Bump for every App Store upload of the same version.
-    buildNumber: "2",
+    buildNumber: "1",
     icon: APP_ICON,
     infoPlist: {
       // Per-screen status bar styles (react-native-screens); the app-wide UIApplication setter is a no-op on iOS 27.
@@ -57,7 +57,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: "#ffffff",
     },
     package: "com.ludussuper.stonks",
-    versionCode: 6,
+    versionCode: 7,
   },
   web: {
     favicon: "./assets/favicon.png",

@@ -27,7 +27,7 @@ def app_store_connect_auth
 end
 
 APP_IDENTIFIER = 'com.ludussuper.stonks'.freeze
-VERSION = '2.0.0'.freeze
+VERSION = '2.0.1'.freeze
 
 # Minimal App Store Connect REST client for endpoints Spaceship has no models for (Game Center).
 def asc_request(method, path, body = nil)
@@ -222,7 +222,7 @@ platform :ios do
 end
 
 platform :ios do
-  desc 'Prepare 2.0.0 in App Store Connect: version, release notes, iPhone screenshots, build. Does not submit.'
+  desc 'Prepare VERSION in App Store Connect: version, release notes, iPhone + iPad screenshots, build. Does not submit.'
   lane :prepare_release do
     api_key = app_store_connect_auth
     deliver(
@@ -244,17 +244,9 @@ platform :ios do
     version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
     UI.user_error!("No editable #{VERSION} version") unless version && version.version_string == VERSION
 
-    # Replace only the 6.7"/6.9" iPhone set; other display types are left as they are.
-    shots = Dir[project_path('store/appstore/iphone-6.9/*.png')].sort
-    version.get_app_store_version_localizations.each do |localization|
-      set = localization.get_app_screenshot_sets.find { |s| s.screenshot_display_type == 'APP_IPHONE_67' } ||
-            localization.create_app_screenshot_set(attributes: { screenshotDisplayType: 'APP_IPHONE_67' })
-      set.app_screenshots.to_a.each(&:delete!)
-      shots.each do |path|
-        set.upload_screenshot(path: path, wait_for_processing: true)
-        UI.message("#{localization.locale}: uploaded #{File.basename(path)}")
-      end
-    end
+    # Replace the iPhone 6.9" and iPad 13" sets; other display types are left as they are.
+    replace_screenshot_set(version, 'APP_IPHONE_67', 'store/appstore/iphone-6.9')
+    replace_screenshot_set(version, 'APP_IPAD_PRO_3GEN_129', 'store/appstore/ipad-13')
 
     build = Spaceship::ConnectAPI::Build.all(app_id: app.id, version: VERSION, sort: '-uploadedDate', limit: 1).first
     UI.user_error!("No processed #{VERSION} build") unless build && build.processing_state == 'VALID'
@@ -262,7 +254,7 @@ platform :ios do
       Spaceship::ConnectAPI.patch_builds(build_id: build.id, attributes: { usesNonExemptEncryption: false })
     end
     version.select_build(build_id: build.id)
-    UI.success("#{VERSION} ready: build #{build.version}, #{shots.size} iPhone screenshots, release notes set")
+    UI.success("#{VERSION} ready: build #{build.version}, iPhone + iPad screenshots, release notes set")
   end
 end
 

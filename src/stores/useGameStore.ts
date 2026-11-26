@@ -78,8 +78,16 @@ const mergeLifetimeStats = (stored: Partial<LifetimeStats> | undefined): Lifetim
   };
 };
 
+export type DailyPnl = { pnl: number; trades: number };
+
+/** Local calendar day, e.g. "2026-11-26". */
+export const getLocalDayKey = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
 type GameState = {
   highScores: HighScore[];
+  /** Realised P&L per local day, for the PnL calendar. */
+  dailyPnl: Record<string, DailyPnl>;
   isPro: boolean;
   darkMode: boolean;
   reviewPromptShown: boolean;
@@ -118,6 +126,7 @@ export const useGameStore = create<GameState>()(
   persist(
     (set) => ({
       highScores: [],
+      dailyPnl: {},
       isPro: false,
       darkMode: false,
       reviewPromptShown: false,
@@ -229,7 +238,10 @@ export const useGameStore = create<GameState>()(
         set((state) => {
           const ls = state.lifetimeStats;
           const newStreak = won ? ls.currentWinStreak + 1 : 0;
+          const dayKey = getLocalDayKey();
+          const day = state.dailyPnl[dayKey] ?? { pnl: 0, trades: 0 };
           return {
+            dailyPnl: { ...state.dailyPnl, [dayKey]: { pnl: day.pnl + profitAmount, trades: day.trades + 1 } },
             lifetimeStats: {
               ...ls,
               currentWinStreak: newStreak,

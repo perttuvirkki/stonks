@@ -37,6 +37,7 @@ import { PatternSettingsModal } from "../src/components/PatternSettingsModal";
 import { ProFeaturesModal } from "../src/components/ProFeaturesModal";
 import { TopScoreModal } from "../src/components/TopScoreModal";
 import { TotalStatsModal } from "../src/components/TotalStatsModal";
+import { PnlCalendarModal } from "../src/components/PnlCalendarModal";
 import { ProfitToast } from "../src/components/ProfitToast";
 import { RoundResultsSheet, type RoundResult, type RoundStats } from "../src/components/RoundResultsSheet";
 import { StackBar, type ChartType } from "../src/components/StackBar";
@@ -1492,7 +1493,8 @@ function AppContent() {
   const dailyMoneyQuote = useMemo(() => getDailyMoneyQuote(), []);
   const isNarrowScreen = windowWidth < 380;
   const isCompactHeight = windowHeight < 760;
-  const launchMenuButtonMinHeight = Math.max(96, (windowHeight - insets.top - insets.bottom - LAUNCH_MENU_HEADER_HEIGHT) / 6);
+  // Eight rows (modes, PnL calendar, Pro, settings) share the screen.
+  const launchMenuButtonMinHeight = Math.max(76, (windowHeight - insets.top - insets.bottom - LAUNCH_MENU_HEADER_HEIGHT) / 8);
   const dailyQuoteFontSize = dailyMoneyQuote.text.length > 300 ? 14 : dailyMoneyQuote.text.length > 200 ? 17 : dailyMoneyQuote.text.length > 140 ? 21 : dailyMoneyQuote.text.length > 90 ? 25 : dailyMoneyQuote.text.length > 65 ? 29 : isNarrowScreen ? 31 : 35;
   const dailyQuoteLineHeight = Math.round(dailyQuoteFontSize * 1.2);
   const dailyMoneyDateLine = useMemo(
@@ -1507,6 +1509,7 @@ function AppContent() {
   const isMarginCallVisibleRef = useRef(false);
   const [isTopScoreVisible, setIsTopScoreVisible] = useState(false);
   const [isTotalStatsVisible, setIsTotalStatsVisible] = useState(false);
+  const [isPnlCalendarVisible, setIsPnlCalendarVisible] = useState(false);
   const [marginCallVariant, setMarginCallVariant] = useState<MarginCallVariant>("classic");
   const [baseTickMs, setBaseTickMs] = useState<ChartSpeedMs>(TICK_MS);
   const baseTickMsRef = useRef<number>(TICK_MS);
@@ -3350,6 +3353,13 @@ function AppContent() {
       },
     },
     {
+      id: "pnlCalendar",
+      title: "PnL Calendar",
+      subtitle: "Every green and red day",
+      accent: terminal.green,
+      onPress: () => setIsPnlCalendarVisible(true),
+    },
+    {
       id: "settings",
       title: "Settings",
       subtitle: "Stats, leaderboards, and app options",
@@ -3408,6 +3418,7 @@ function AppContent() {
             isPurchasing={isRevenueCatLoading}
           />
           </SafeAreaView>
+          <PnlCalendarModal visible={isPnlCalendarVisible} darkMode={darkMode} onClose={() => setIsPnlCalendarVisible(false)} />
         </Animated.View>
         {showAnimatedSplash && <AnimatedSplash darkMode={darkMode} onComplete={() => setShowAnimatedSplash(false)} />}
       </>

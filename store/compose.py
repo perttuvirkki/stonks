@@ -22,21 +22,33 @@ MEDIUM = str(FONT_DIR / "SF-Mono-Medium.otf")
 # Dark terminal palette (src/theme/terminal.ts).
 BG = (0, 0, 0)
 AMBER = (255, 158, 27)
+GREEN = (37, 208, 125)  # terminal green, the app's profit colour
 TEXT = (242, 242, 242)
 DIM = (154, 154, 154)
 BORDER = (77, 77, 77)
 
 # Order is the store order: the first one is what people see in search results.
-# Two short lines per shot (max 8 characters each) so the headline stays huge and
-# readable at store thumbnail size.
+# Captions in the live listing's voice: a white setup line, a green punchline. A caption
+# given as one (white, green) pair sits on a single row, centred in the two-row block.
 SHOTS = [
-    ("sprint-toast", ("50X", "LEVERAGE")),
-    ("sprint-open", ("60 SEC", "SPRINTS")),
-    ("training-c", ("LEARN", "PATTERNS")),
-    ("quiz-reveal", ("POP", "QUIZ")),
-    ("results", ("FLEX", "YOUR WIN")),
-    ("menu", ("5 GAME", "MODES")),
+    ("sprint-toast", ("60 Seconds.", "One Chart.")),
+    ("training-c", ("Patterns", "Always Repeat")),
+    ("quiz-reveal", [("Skill > ", "Luck")]),
+    ("sprint-open", ("Don't Be", "Exit Liquidity")),
+    ("results", ("Show Off", "Your Wins")),
+    ("pnl-calendar", ("Paint Your", "Month Green")),
+    ("menu", ("5 Ways", "To Get Rekt")),
 ]
+
+
+def headline_size(draw, width, margin, unit):
+    """One type size for the whole set: the largest (up to a cap) that fits every line."""
+    lines = ["".join(line) if isinstance(line, tuple) else line for _, caption in SHOTS for line in caption]
+    size = round(150 * unit)
+    while size > 20 and any(draw.textlength(line, font=ImageFont.truetype(HEAVY, size)) > width - 2 * margin for line in lines):
+        size -= 2
+    return size
+
 
 # folder -> (canvas size, raw capture folder, raw names that differ from SHOTS)
 TARGETS = {
@@ -44,6 +56,9 @@ TARGETS = {
     ROOT / "play" / "phone": ((1080, 2160), RAW, {}),
     ROOT / "appstore" / "ipad-13": ((2064, 2752), ROOT / "raw-ipad", {"training-c": "training"}),
 }
+
+# Per target, shots cropped from the bottom up instead of the top down.
+ANCHOR_BOTTOM = {ROOT / "appstore" / "ipad-13": {"quiz-reveal"}}
 
 
 def wrap(draw, text, font, max_width):
@@ -68,50 +83,56 @@ def rounded(image, radius):
     return out
 
 
-def headline_size(draw, width, margin, unit):
-    """One type size for the whole set: the largest that fits every line across the canvas."""
-    longest = max((line for _, lines in SHOTS for line in lines), key=len)
-    size = round(300 * unit)
-    while size > 20 and draw.textlength(longest, font=ImageFont.truetype(HEAVY, size)) > width - 2 * margin:
-        size -= 4
-    return size
-
-
-def compose(raw_path, lines, size):
+def compose(raw_path, caption, size, anchor_bottom=False):
     width, height = size
     unit = width / 1320  # scale everything off the 6.9" layout
     canvas = Image.new("RGB", size, BG)
     draw = ImageDraw.Draw(canvas)
-    margin = round(64 * unit)
+    margin = round(72 * unit)
 
-    # Thin amber terminal band.
-    draw.rectangle((0, 0, width, round(28 * unit)), fill=AMBER)
+    # Thin green terminal band.
+    draw.rectangle((0, 0, width, round(24 * unit)), fill=GREEN)
 
-    # Huge two-line headline: first line amber, second white.
+    # Headline: white setup line over a green punchline, with room to breathe above and below.
     font = ImageFont.truetype(HEAVY, headline_size(draw, width, margin, unit))
     ascent, descent = font.getmetrics()
-    line_height = ascent + descent
-    y = round(96 * unit)
-    for index, line in enumerate(lines):
-        draw.text((width / 2, y), line, font=font, fill=AMBER if index == 0 else TEXT, anchor="mt")
-        y += round(line_height * 0.92)
+    line_height = round((ascent + descent) * 1.08)
+    y = round(150 * unit)
+    block_bottom = y + 2 * line_height  # every caption reserves two rows, so the devices line up
+    y += (2 - len(caption)) * line_height // 2
+    for index, line in enumerate(caption):
+        if isinstance(line, tuple):
+            white, green = line
+            left = (width - draw.textlength(white + green, font=font)) / 2
+            draw.text((left, y), white, font=font, fill=TEXT, anchor="lt")
+            draw.text((left + draw.textlength(white, font=font), y), green, font=font, fill=GREEN, anchor="lt")
+        else:
+            draw.text((width / 2, y), line, font=font, fill=TEXT if index == 0 else GREEN, anchor="mt")
+        y += line_height
+    y = block_bottom
 
-    # The screenshot, framed like a terminal panel, filling the rest.
-    top = y + round(48 * unit)
-    bottom_pad = round(56 * unit)
+    # The screenshot sits low and large, running off the bottom edge; only its top
+    # corners are rounded.
+    top = y + round(96 * unit)
     shot = Image.open(raw_path).convert("RGB")
-    scale = min((height - top - bottom_pad) / shot.height, (width - 2 * margin) / shot.width)
-    shot = shot.resize((round(shot.width * scale), round(shot.height * scale)), Image.LANCZOS)
-    radius = round(48 * unit)
+    device_width = round(width * (0.86 if width / height < 0.6 else 0.78))
+    scale = device_width / shot.width
+    shot = shot.resize((device_width, round(shot.height * scale)), Image.LANCZOS)
+    visible = min(shot.height, height - top)
+    # Shots whose point is at the bottom of the screen (the quiz card) show their lower part.
+    crop_top = shot.height - visible if anchor_bottom else 0
+    shot = shot.crop((0, crop_top, shot.width, crop_top + visible))
+    radius = round(56 * unit)
+    border = max(3, round(5 * unit))
     x = (width - shot.width) // 2
-    border = max(2, round(4 * unit))
     draw.rounded_rectangle(
-        (x - border, top - border, x + shot.width + border, top + shot.height + border),
+        (x - border, top - border, x + shot.width + border, height + radius),
         radius=radius + border,
         fill=BORDER,
     )
-    masked = rounded(shot, radius)
-    canvas.paste(masked, (x, top), masked)
+    mask = Image.new("L", shot.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, shot.width, shot.height + radius), radius=radius, fill=255)
+    canvas.paste(shot, (x, top), mask)
     return canvas
 
 
@@ -120,9 +141,10 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
         for old in folder.glob("*.png"):
             old.unlink()
-        for index, (name, lines) in enumerate(SHOTS, start=1):
+        for index, (name, caption) in enumerate(SHOTS, start=1):
             out = folder / f"{index:02d}-{name}.png"
-            compose(raw_dir / f"{renames.get(name, name)}.png", lines, size).save(out, optimize=True)
+            anchor = name in ANCHOR_BOTTOM.get(folder, set())
+            compose(raw_dir / f"{renames.get(name, name)}.png", caption, size, anchor).save(out, optimize=True)
             print(out.relative_to(ROOT.parent), size)
 
 

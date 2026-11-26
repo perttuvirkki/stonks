@@ -1,9 +1,6 @@
-Stonks 2.0 is here.
+New: PnL Calendar.
 
-• New market engine: patterns form, retest and break out like real charts
-• Pop Quiz: the chart freezes, you call long or short
-• Training Wheels is playable, scored in % with no money at risk
-• Leaderboards for 60s Sprint, 5 Trades and all-time profit
-• 15 achievements to unlock
-• Dark terminal theme for Pro
-• Set the chart speed anywhere from 25ms to 250ms
+• Every trading day on one calendar, painted green or red
+• Monthly P&L, win/loss days and your green-day streak
+• Tap any day to see what you made (or donated)
+• All eight menu items now fit on one screen
