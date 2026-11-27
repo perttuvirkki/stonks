@@ -475,3 +475,34 @@ platform :ios do
     UI.success("Resubmitted #{VERSION}: #{state}")
   end
 end
+
+platform :android do
+  desc 'Upload the 2.0.1 AAB, release notes and phone screenshots to Google Play production and send for review. ' \
+       'Needs PLAY_JSON_KEY (service-account JSON path). Options: locale (default en-US), validate_only:true'
+  lane :play_release do |options|
+    json_key = ENV['PLAY_JSON_KEY'].to_s
+    UI.user_error!('Set PLAY_JSON_KEY to a Play Console service-account JSON') unless File.file?(File.expand_path(json_key))
+    version_code = 7
+    locale = options[:locale] || 'en-US'
+    # supply wants metadata/<locale>/changelogs/<code>.txt and images/phoneScreenshots/; stage it from our sources.
+    staging = project_path('build/play-metadata')
+    FileUtils.rm_rf(staging)
+    shots = File.join(staging, locale, 'images', 'phoneScreenshots')
+    FileUtils.mkdir_p([shots, File.join(staging, locale, 'changelogs')])
+    FileUtils.cp(Dir[project_path('store/play/phone/*.png')].sort, shots)
+    FileUtils.cp(project_path('fastlane/metadata/en-GB/release_notes.txt'), File.join(staging, locale, 'changelogs', "#{version_code}.txt"))
+    upload_to_play_store(
+      json_key: File.expand_path(json_key),
+      package_name: APP_IDENTIFIER,
+      aab: project_path("build/stonks-#{VERSION}-#{version_code}.aab"),
+      track: 'production',
+      release_status: 'completed',
+      metadata_path: staging,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: false,
+      sync_image_upload: true,
+      validate_only: options[:validate_only] || false
+    )
+  end
+end
